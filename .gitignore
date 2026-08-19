@@ -46,6 +46,7 @@ app.*.map.json
 .env
 .env.local
 .env.*.local
+ios/Flutter/Secrets.xcconfig
 
 # Brainstorm / visual companion
 .superpowers/
