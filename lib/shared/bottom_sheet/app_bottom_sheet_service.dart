@@ -1,0 +1,79 @@
+import 'package:flutter/material.dart';
+import 'package:test_y_app/shared/bottom_sheet/app_bottom_sheet.dart';
+import 'package:test_y_app/shared/bottom_sheet/app_bottom_sheet_action.dart';
+
+class AppBottomSheetService {
+  AppBottomSheetService._();
+
+  static Future<T?> show<T>({
+    required BuildContext context,
+    String? title,
+    String? message,
+    Widget? content,
+    required List<AppBottomSheetAction> actions,
+    bool isDismissible = true,
+    bool useRootNavigator = false,
+  }) {
+    return showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: isDismissible,
+      enableDrag: isDismissible,
+      useRootNavigator: useRootNavigator,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: AppBottomSheet(
+            title: title,
+            message: message,
+            content: content,
+            actions: actions,
+          ),
+        );
+      },
+    );
+  }
+
+  static Future<bool?> showConfirm({
+    required BuildContext context,
+    required String title,
+    String? message,
+    String confirmLabel = 'Xác nhận',
+    String cancelLabel = 'Huỷ',
+    AppBottomSheetActionStyle confirmStyle = AppBottomSheetActionStyle.primary,
+  }) {
+    return show<bool>(
+      context: context,
+      title: title,
+      message: message,
+      actions: [
+        AppBottomSheetAction(label: cancelLabel, returnValue: false),
+        AppBottomSheetAction(
+          label: confirmLabel,
+          style: confirmStyle,
+          returnValue: true,
+        ),
+      ],
+    );
+  }
+
+  static Future<void> showLogoutConfirm({
+    required BuildContext context,
+    required VoidCallback onConfirm,
+  }) async {
+    final confirmed = await showConfirm(
+      context: context,
+      title: 'Đăng xuất?',
+      message: 'Bạn có chắc muốn đăng xuất khỏi tài khoản?',
+      confirmLabel: 'Đăng xuất',
+      cancelLabel: 'Huỷ',
+      confirmStyle: AppBottomSheetActionStyle.destructive,
+    );
+    if (confirmed == true) {
+      onConfirm();
+    }
+  }
+}
