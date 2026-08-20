@@ -23,59 +23,72 @@ class WarehouseListPage extends StatelessWidget {
         final canManage = canManageMasterDataForAuthState(authState);
         final canCreate = canCreateMasterDataForAuthState(authState);
 
-        final body = BlocBuilder<WarehouseListBloc, WarehouseListState>(
-          builder: (context, state) {
-            if (state is WarehouseListLoading || state is WarehouseListInitial) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (state is WarehouseListFailure) {
-              return _ErrorView(message: state.message);
-            }
-            if (state is! WarehouseListLoaded) {
-              return const SizedBox.shrink();
-            }
-
-            final items = state.filtered;
-            return RefreshIndicator(
-              onRefresh: () async {
-                context.read<WarehouseListBloc>().add(
-                  const WarehouseListRefreshed(),
-                );
-              },
-              child: ListView(
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-                children: [
-                  AppSearchField<Warehouse>(
-                    hintText: 'Tìm theo tên hoặc mã kho...',
-                    searchApi: (query) async {
-                      context.read<WarehouseListBloc>().add(
-                        WarehouseListSearchChanged(query),
-                      );
-                      final current = context.read<WarehouseListBloc>().state;
-                      if (current is WarehouseListLoaded) {
-                        return current.filtered;
-                      }
-                      return const [];
-                    },
-                    onResultsChanged: (_) {},
-                    onChanged: (q) => context.read<WarehouseListBloc>().add(
-                      WarehouseListSearchChanged(q),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _SummaryBar(count: items.length),
-                  const SizedBox(height: 12),
-                  if (items.isEmpty)
-                    const _EmptyView()
-                  else
-                    ...items.map(
-                      (w) => _WarehouseCard(warehouse: w, canManage: canManage),
-                    ),
-                ],
-              ),
-            );
+        final body = BlocListener<WarehouseListBloc, WarehouseListState>(
+          listenWhen: (previous, current) =>
+              current is WarehouseListLoaded &&
+              current.errorMessage != null &&
+              (previous is! WarehouseListLoaded ||
+                  previous.errorMessage != current.errorMessage),
+          listener: (context, state) {
+            final message = (state as WarehouseListLoaded).errorMessage!;
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(content: Text(message)));
           },
+          child: BlocBuilder<WarehouseListBloc, WarehouseListState>(
+            builder: (context, state) {
+              if (state is WarehouseListLoading ||
+                  state is WarehouseListInitial) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (state is WarehouseListFailure) {
+                return _ErrorView(message: state.message);
+              }
+              if (state is! WarehouseListLoaded) {
+                return const SizedBox.shrink();
+              }
+
+              final items = state.filtered;
+              return RefreshIndicator(
+                onRefresh: () => _pullRefresh(context),
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                  children: [
+                    AppSearchField<Warehouse>(
+                      hintText: 'Tìm theo tên hoặc mã kho...',
+                      searchApi: (query) async {
+                        context.read<WarehouseListBloc>().add(
+                          WarehouseListSearchChanged(query),
+                        );
+                        final current = context.read<WarehouseListBloc>().state;
+                        if (current is WarehouseListLoaded) {
+                          return current.filtered;
+                        }
+                        return const [];
+                      },
+                      onResultsChanged: (_) {},
+                      onChanged: (q) => context.read<WarehouseListBloc>().add(
+                        WarehouseListSearchChanged(q),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _SummaryBar(count: items.length),
+                    const SizedBox(height: 12),
+                    if (items.isEmpty)
+                      const _EmptyView()
+                    else
+                      ...items.map(
+                        (w) =>
+                            _WarehouseCard(warehouse: w, canManage: canManage),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
         );
 
         if (embedded) {
@@ -107,6 +120,16 @@ class WarehouseListPage extends StatelessWidget {
   Future<void> _addWarehouse(BuildContext context) async {
     final ok = await context.push<bool>('/warehouses/new');
     if (ok == true && context.mounted) _refresh(context);
+  }
+
+  Future<void> _pullRefresh(BuildContext context) async {
+    final bloc = context.read<WarehouseListBloc>();
+    bloc.add(const WarehouseListRefreshed());
+    await bloc.stream.firstWhere(
+      (state) =>
+          (state is WarehouseListLoaded && !state.isRefreshing) ||
+          state is WarehouseListFailure,
+    );
   }
 
   void _refresh(BuildContext context) {

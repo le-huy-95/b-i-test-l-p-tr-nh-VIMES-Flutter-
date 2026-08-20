@@ -11,15 +11,30 @@ class MeResult {
   final List<TenantMembership> tenants;
 
   factory MeResult.fromJson(Map<String, dynamic> json) {
-    final tenantsJson = json['tenants'];
+    final userJson = json['user'];
+    final userMap = userJson is Map<String, dynamic>
+        ? userJson
+        : userJson is Map
+            ? Map<String, dynamic>.from(userJson)
+            : json;
+
     return MeResult(
-      user: User.fromJson(json),
-      tenants: tenantsJson is List
-          ? tenantsJson
-              .whereType<Map>()
-              .map((e) => TenantMembership.fromJson(Map<String, dynamic>.from(e)))
-              .toList()
-          : const [],
+      user: User.fromJson(userMap),
+      tenants: parseTenantMemberships(json),
     );
+  }
+
+  /// Parses tenant memberships from `/auth/me` (and compatible login payloads).
+  static List<TenantMembership> parseTenantMemberships(Map<String, dynamic> json) {
+    final tenantsJson =
+        json['tenants'] ?? json['memberships'] ?? json['tenantMemberships'];
+
+    if (tenantsJson is! List) return const [];
+
+    return tenantsJson
+        .whereType<Map>()
+        .map((e) => TenantMembership.fromJson(Map<String, dynamic>.from(e)))
+        .where((tenant) => tenant.id.isNotEmpty)
+        .toList();
   }
 }

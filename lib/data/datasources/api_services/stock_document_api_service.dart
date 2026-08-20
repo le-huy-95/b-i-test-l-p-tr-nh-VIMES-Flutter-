@@ -64,6 +64,18 @@ class StockDocumentApiService extends BaseApiService {
         : const [];
   }
 
+  Future<AvailableActions> availableActions(String type, String id) async {
+    final response = await getRequest<AvailableActions>(
+      ApiEndpoints.workflowAvailableActions(type, id),
+      decode: (value) =>
+          AvailableActions.fromJson(Map<String, dynamic>.from(value as Map)),
+    );
+    if (!response.success || response.data == null) {
+      _throw(response, 'Không tải được actions');
+    }
+    return response.data!;
+  }
+
   Never _throw(ApiResponse<dynamic> response, String fallback) {
     throw Exception(response.error ?? response.message ?? fallback);
   }

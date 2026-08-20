@@ -48,10 +48,34 @@ class WarehouseListLoading extends WarehouseListState {
 }
 
 class WarehouseListLoaded extends WarehouseListState {
-  const WarehouseListLoaded({required this.items, required this.query});
+  const WarehouseListLoaded({
+    required this.items,
+    required this.query,
+    this.isRefreshing = false,
+    this.errorMessage,
+  });
 
   final List<Warehouse> items;
   final String query;
+  final bool isRefreshing;
+  final String? errorMessage;
+
+  WarehouseListLoaded copyWith({
+    List<Warehouse>? items,
+    String? query,
+    bool? isRefreshing,
+    String? errorMessage,
+    bool clearErrorMessage = false,
+  }) {
+    return WarehouseListLoaded(
+      items: items ?? this.items,
+      query: query ?? this.query,
+      isRefreshing: isRefreshing ?? this.isRefreshing,
+      errorMessage: clearErrorMessage
+          ? null
+          : errorMessage ?? this.errorMessage,
+    );
+  }
 
   List<Warehouse> get filtered {
     final q = query.trim().toLowerCase();
@@ -67,7 +91,7 @@ class WarehouseListLoaded extends WarehouseListState {
   }
 
   @override
-  List<Object?> get props => [items, query];
+  List<Object?> get props => [items, query, isRefreshing, errorMessage];
 }
 
 class WarehouseListFailure extends WarehouseListState {
@@ -102,7 +126,20 @@ class WarehouseListBloc extends Bloc<WarehouseListEvent, WarehouseListState> {
     WarehouseListRefreshed event,
     Emitter<WarehouseListState> emit,
   ) async {
-    await _reloadFromApi(emit);
+    final current = state;
+    if (current is! WarehouseListLoaded) {
+      await _reloadFromApi(emit);
+      return;
+    }
+    emit(current.copyWith(isRefreshing: true, clearErrorMessage: true));
+    try {
+      _cache = await _repository.list();
+      emit(WarehouseListLoaded(items: _cache, query: current.query));
+    } catch (e) {
+      emit(
+        current.copyWith(isRefreshing: false, errorMessage: _friendly(e)),
+      );
+    }
   }
 
   Future<void> _reloadFromApi(Emitter<WarehouseListState> emit) async {
@@ -143,7 +180,14 @@ class WarehouseListBloc extends Bloc<WarehouseListEvent, WarehouseListState> {
     WarehouseListSearchChanged event,
     Emitter<WarehouseListState> emit,
   ) {
-    emit(WarehouseListLoaded(items: _cache, query: event.query));
+    final current = state;
+    emit(
+      WarehouseListLoaded(
+        items: _cache,
+        query: event.query,
+        isRefreshing: current is WarehouseListLoaded && current.isRefreshing,
+      ),
+    );
   }
 
   Warehouse? _findCachedWarehouse(String warehouseId) {

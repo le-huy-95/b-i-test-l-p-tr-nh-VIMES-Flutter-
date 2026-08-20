@@ -41,7 +41,8 @@ class TenantSelectBloc extends Bloc<TenantSelectEvent, TenantSelectState> {
     emit(TenantSelectRefreshing(tenants: current));
     try {
       final fresh = await _authRepository.fetchMyTenants();
-      emit(TenantSelectInitial(tenants: List.unmodifiable(fresh)));
+      final resolved = fresh.isNotEmpty ? fresh : current;
+      emit(TenantSelectInitial(tenants: List.unmodifiable(resolved)));
     } catch (e) {
       emit(
         TenantSelectFailure(

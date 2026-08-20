@@ -17,6 +17,7 @@ class StorageManager {
   static const String _refreshTokenKey = 'refresh_token';
   static const String _userInfoKey = 'user_info';
   static const String _tenantIdKey = 'tenant_id';
+  static const String _tenantMembershipsKey = 'tenant_memberships';
   static const String _deviceIdKey = 'device_id';
   static const String _rememberMeKey = 'remember_me';
   static const String _rememberedCredentialsKey = 'remembered_credentials';
@@ -99,6 +100,24 @@ class StorageManager {
     await _storage.delete(key: _tenantIdKey);
   }
 
+  Future<void> saveTenantMemberships(List<Map<String, dynamic>> tenants) async {
+    await saveJson(_tenantMembershipsKey, tenants);
+  }
+
+  Future<List<Map<String, dynamic>>> getTenantMemberships() async {
+    final raw = await getJson(_tenantMembershipsKey);
+    if (raw is! List) return const [];
+
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<void> deleteTenantMemberships() async {
+    await _storage.delete(key: _tenantMembershipsKey);
+  }
+
   Future<String> getOrCreateDeviceId() async {
     final existing = await _storage.read(key: _deviceIdKey);
     if (existing != null && existing.isNotEmpty) return existing;
@@ -154,6 +173,7 @@ class StorageManager {
       deleteRefreshToken(),
       deleteUserInfo(),
       deleteTenantId(),
+      deleteTenantMemberships(),
       _storage.delete(key: 'token_expires_at'),
     ]);
   }

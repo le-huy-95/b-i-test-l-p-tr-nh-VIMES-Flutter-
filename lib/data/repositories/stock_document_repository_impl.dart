@@ -22,4 +22,8 @@ class StockDocumentRepositoryImpl implements StockDocumentRepository {
   @override
   Future<List<TimelineEvent>> timeline(String documentType, String id) =>
       _api.timeline(documentType, id);
+
+  @override
+  Future<AvailableActions> availableActions(String documentType, String id) =>
+      _api.availableActions(documentType, id);
 }

@@ -1,6 +1,6 @@
 import 'package:test_y_app/core/auth/tenant_permissions.dart';
 
-enum StockDocAction { submit, approve, delegate, reject, complete, cancel, clone }
+enum StockDocAction { submit, approve, reject, skip, proxySign, complete, cancel, clone }
 
 const stockWorkflowStepStatuses = <String>{
   'pending',
@@ -56,8 +56,26 @@ String workflowStepLabel(String stepCode) {
     'step_2' => 'Bước 2',
     'step_3' => 'Bước 3',
     'step_4' => 'Bước 4',
-    _ => stepCode,
+    'creator' => 'Người tạo',
+    'reviewer' => 'Người duyệt',
+    'approver' => 'Người phê duyệt',
+    'accountant' => 'Kế toán',
+    'warehouse' => 'Thủ kho',
+    _ => _humanizeStepCode(stepCode),
   };
+}
+
+String _humanizeStepCode(String stepCode) {
+  final normalized = stepCode.trim();
+  if (normalized.isEmpty) return '—';
+  return normalized
+      .split(RegExp(r'[_\-\s]+'))
+      .where((part) => part.isNotEmpty)
+      .map(
+        (part) =>
+            '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+      )
+      .join(' ');
 }
 
 bool isWorkflowStepActive(String status) {
@@ -100,7 +118,6 @@ List<StockDocAction> _visible({
   if (isReview) {
     if (canApproveOrCompleteStockDoc(role)) {
       actions.add(StockDocAction.approve);
-      actions.add(StockDocAction.delegate);
       actions.add(StockDocAction.reject);
     }
     if (canCancelStockDoc(role)) actions.add(StockDocAction.cancel);
@@ -123,11 +140,12 @@ List<StockDocAction> _visible({
 String workflowActionLabel(StockDocAction action) {
   return switch (action) {
     StockDocAction.submit => 'Gửi duyệt',
-    StockDocAction.approve => 'Duyệt',
-    StockDocAction.delegate => 'Ủy quyền',
+    StockDocAction.approve => 'Phê duyệt',
     StockDocAction.reject => 'Từ chối',
+    StockDocAction.skip => 'Bỏ qua',
+    StockDocAction.proxySign => 'Ký thay',
     StockDocAction.complete => 'Hoàn tất',
-    StockDocAction.cancel => 'Hủy',
+    StockDocAction.cancel => 'Hủy phiếu',
     StockDocAction.clone => 'Tạo lại',
   };
 }
@@ -136,8 +154,9 @@ String workflowActionCode(StockDocAction action) {
   return switch (action) {
     StockDocAction.submit => 'submit',
     StockDocAction.approve => 'approve',
-    StockDocAction.delegate => 'delegate',
     StockDocAction.reject => 'reject',
+    StockDocAction.skip => 'skip',
+    StockDocAction.proxySign => 'proxy_sign',
     StockDocAction.complete => 'complete',
     StockDocAction.cancel => 'cancel',
     StockDocAction.clone => 'submit',

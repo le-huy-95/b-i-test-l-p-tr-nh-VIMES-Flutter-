@@ -49,6 +49,11 @@ class StockIssueDocumentData {
     required this.lines,
     this.customerId,
     this.note,
+    this.deliveredByContactId,
+    this.deliveredByFullName,
+    this.deliveredByPhone,
+    this.deliveredByCompanyName,
+    this.deliveredByNote,
   });
 
   final String id;
@@ -60,9 +65,29 @@ class StockIssueDocumentData {
   final String? customerId;
   final String? note;
   final List<StockIssueLineData> lines;
+  final String? deliveredByContactId;
+  final String? deliveredByFullName;
+  final String? deliveredByPhone;
+  final String? deliveredByCompanyName;
+  final String? deliveredByNote;
 
   factory StockIssueDocumentData.fromJson(Map<String, dynamic> json) {
-    final rawLines = json['details'];
+    final rawLines = json['details'] ?? json['lines'];
+    final deliveredBy = json['deliveredBy'];
+    String? contactId;
+    String? fullName;
+    String? phone;
+    String? companyName;
+    String? note;
+    if (deliveredBy is Map) {
+      contactId = deliveredBy['contactId']?.toString();
+      fullName = deliveredBy['fullName']?.toString();
+      phone = deliveredBy['phone']?.toString();
+      companyName = deliveredBy['companyName']?.toString();
+      note = deliveredBy['note']?.toString();
+    } else if (deliveredBy is String) {
+      fullName = deliveredBy;
+    }
     return StockIssueDocumentData(
       id: '${json['id'] ?? ''}',
       code: '${json['code'] ?? ''}',
@@ -75,6 +100,11 @@ class StockIssueDocumentData {
       lines: rawLines is List
           ? rawLines.whereType<Map>().map((e) => StockIssueLineData.fromJson(Map<String, dynamic>.from(e))).toList()
           : const [],
+      deliveredByContactId: contactId,
+      deliveredByFullName: fullName,
+      deliveredByPhone: phone,
+      deliveredByCompanyName: companyName,
+      deliveredByNote: note,
     );
   }
 }
@@ -116,7 +146,11 @@ class StockReceiptDocumentData {
     required this.receiptDate,
     required this.lines,
     this.supplierId,
-    this.deliveredByName,
+    this.deliveredByContactId,
+    this.deliveredByFullName,
+    this.deliveredByPhone,
+    this.deliveredByCompanyName,
+    this.deliveredByNote,
     this.note,
   });
 
@@ -127,12 +161,31 @@ class StockReceiptDocumentData {
   final String receiptType;
   final DateTime receiptDate;
   final String? supplierId;
-  final String? deliveredByName;
+  final String? deliveredByContactId;
+  final String? deliveredByFullName;
+  final String? deliveredByPhone;
+  final String? deliveredByCompanyName;
+  final String? deliveredByNote;
   final String? note;
   final List<StockReceiptLineData> lines;
 
   factory StockReceiptDocumentData.fromJson(Map<String, dynamic> json) {
-    final rawLines = json['details'];
+    final rawLines = json['details'] ?? json['lines'];
+    final deliveredBy = json['deliveredBy'];
+    String? contactId;
+    String? fullName;
+    String? phone;
+    String? companyName;
+    String? note;
+    if (deliveredBy is Map) {
+      contactId = deliveredBy['contactId']?.toString();
+      fullName = deliveredBy['fullName']?.toString();
+      phone = deliveredBy['phone']?.toString();
+      companyName = deliveredBy['companyName']?.toString();
+      note = deliveredBy['note']?.toString();
+    } else {
+      fullName = json['deliveredByName']?.toString();
+    }
     return StockReceiptDocumentData(
       id: '${json['id'] ?? ''}',
       code: '${json['code'] ?? ''}',
@@ -141,7 +194,11 @@ class StockReceiptDocumentData {
       receiptType: '${json['receiptType'] ?? 'purchase'}',
       receiptDate: DateTime.tryParse('${json['receiptDate'] ?? ''}') ?? DateTime.now(),
       supplierId: json['supplierId']?.toString(),
-      deliveredByName: json['deliveredByName']?.toString(),
+      deliveredByContactId: contactId,
+      deliveredByFullName: fullName,
+      deliveredByPhone: phone,
+      deliveredByCompanyName: companyName,
+      deliveredByNote: note,
       note: json['note']?.toString(),
       lines: rawLines is List
           ? rawLines.whereType<Map>().map((e) => StockReceiptLineData.fromJson(Map<String, dynamic>.from(e))).toList()

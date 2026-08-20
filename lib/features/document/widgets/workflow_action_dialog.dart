@@ -40,6 +40,7 @@ class WorkflowActionDialog extends StatefulWidget {
     required this.needsProxy,
     required this.needsAuthorization,
     required this.needsNote,
+    required this.needsSkip,
   });
 
   final String title;
@@ -49,6 +50,7 @@ class WorkflowActionDialog extends StatefulWidget {
   final bool needsProxy;
   final bool needsAuthorization;
   final bool needsNote;
+  final bool needsSkip;
 
   static Future<WorkflowActionRequest?> show(
     BuildContext context, {
@@ -59,6 +61,7 @@ class WorkflowActionDialog extends StatefulWidget {
     bool needsProxy = false,
     bool needsAuthorization = false,
     bool needsNote = false,
+    bool needsSkip = false,
   }) {
     return showDialog<WorkflowActionRequest>(
       context: context,
@@ -71,6 +74,7 @@ class WorkflowActionDialog extends StatefulWidget {
         needsProxy: needsProxy,
         needsAuthorization: needsAuthorization,
         needsNote: needsNote,
+        needsSkip: needsSkip,
       ),
     );
   }
@@ -94,6 +98,10 @@ class _WorkflowActionDialogState extends State<WorkflowActionDialog> {
   void initState() {
     super.initState();
     _loadMembers();
+    // For skip action on the delivery step, pre-fill with a default note.
+    if (widget.needsSkip) {
+      _noteController.text = 'Bỏ qua bước giao hàng (không có người giao hàng ngoài)';
+    }
   }
 
   @override

@@ -5,4 +5,5 @@ abstract class StockDocumentRepository {
   Future<StockDocument> getDetail(String documentType, String id);
   Future<StockDocument> action(String documentType, String id, Map<String, dynamic> body);
   Future<List<TimelineEvent>> timeline(String documentType, String id);
+  Future<AvailableActions> availableActions(String documentType, String id);
 }

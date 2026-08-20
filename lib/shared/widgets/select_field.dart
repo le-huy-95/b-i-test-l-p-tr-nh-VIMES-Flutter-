@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:test_y_app/core/skin/color_skin.dart';
 import 'package:test_y_app/core/skin/typo_skin.dart';
+import 'package:test_y_app/shared/bottom_sheet/app_bottom_sheet_service.dart';
 import 'package:test_y_app/shared/widgets/app_button.dart';
 import 'package:test_y_app/shared/widgets/app_field_styles.dart';
 
@@ -28,6 +29,9 @@ class AppSelectField<T extends AppSelectItem> extends StatelessWidget {
     this.helperText,
     this.actionLabel,
     this.onAction,
+    this.labelTrailing,
+    this.onBeforeOpen,
+    this.bottomSheetMaxHeightFactor = 0.68,
   });
 
   final String label;
@@ -43,6 +47,9 @@ class AppSelectField<T extends AppSelectItem> extends StatelessWidget {
   final String? helperText;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final Widget? labelTrailing;
+  final Future<List<T>> Function()? onBeforeOpen;
+  final double bottomSheetMaxHeightFactor;
 
   T? _currentItem(String? selected) {
     if (selected == null) return null;
@@ -63,17 +70,21 @@ class AppSelectField<T extends AppSelectItem> extends StatelessWidget {
 
         return AppLabeledField(
           label: label,
+          trailing: labelTrailing,
           child: InkWell(
             onTap: enabled
                 ? () async {
+                    final refreshedItems = await onBeforeOpen?.call() ?? items;
+                    if (!field.context.mounted) return;
                     final selectedItem = await AppSelectBottomSheet.show<T>(
                       context,
                       title: bottomSheetTitle ?? label,
                       searchHint: searchHint ?? 'Tìm kiếm',
                       emptyText: emptyText,
-                      items: items,
+                      items: refreshedItems,
                       actionLabel: actionLabel,
                       onAction: onAction,
+                      maxHeightFactor: bottomSheetMaxHeightFactor,
                     );
                     field.didChange(selectedItem?.id);
                     onChanged(selectedItem?.id);
@@ -130,31 +141,25 @@ class AppSelectBottomSheet<T extends AppSelectItem> extends StatefulWidget {
     required String emptyText,
     String? actionLabel,
     VoidCallback? onAction,
+    double maxHeightFactor = 0.68,
   }) {
-    return showModalBottomSheet<T>(
+    return AppBottomSheetService.show<T>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        final height = MediaQuery.sizeOf(sheetContext).height * 0.75;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: height),
-            child: AppSelectBottomSheet<T>(
-              title: title,
-              items: items,
-              searchHint: searchHint,
-              emptyText: emptyText,
-              actionLabel: actionLabel,
-              onAction: onAction,
-            ),
-          ),
-        );
-      },
+      // List sheet owns chrome + Expanded list — needs bounded height,
+      // not nested SingleChildScrollView.
+      scrollableContent: false,
+      showHandle: false,
+      contentPadding: EdgeInsets.zero,
+      maxHeightFactor: maxHeightFactor,
+      content: AppSelectBottomSheet<T>(
+        title: title,
+        items: items,
+        searchHint: searchHint,
+        emptyText: emptyText,
+        actionLabel: actionLabel,
+        onAction: onAction,
+      ),
+      actions: const [],
     );
   }
 
@@ -184,14 +189,12 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: ColorSkin.white,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          const SizedBox(height: 10),
-          Container(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 10),
+        Center(
+          child: Container(
             width: 42,
             height: 4,
             decoration: BoxDecoration(
@@ -199,89 +202,48 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
               borderRadius: BorderRadius.circular(999),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                widget.title,
-                style: TypoSkin.title2.copyWith(color: ColorSkin.title),
-              ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              widget.title,
+              style: TypoSkin.title2.copyWith(color: ColorSkin.title),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: TextField(
-              controller: _query,
-              autofocus: true,
-              onChanged: (_) => setState(() {}),
-              decoration: appFieldDecoration(
-                hintText: widget.searchHint,
-                prefixIcon: const Icon(Icons.search),
-                enabled: true,
-              ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: TextField(
+            controller: _query,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            decoration: appFieldDecoration(
+              hintText: widget.searchHint,
+              prefixIcon: const Icon(Icons.search),
+              enabled: true,
             ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: _filtered.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.emptyText,
-                          style: TypoSkin.bodyText2.copyWith(
-                            color: ColorSkin.subtitle,
-                          ),
-                        ),
-                        if (widget.onAction != null &&
-                            widget.actionLabel != null) ...[
-                          const SizedBox(height: 16),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: AppButton(
-                              label: widget.actionLabel!,
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                widget.onAction?.call();
-                              },
-                              variant: AppButtonVariant.primary,
-                              expand: true,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  )
-                : Column(
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: _filtered.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          itemCount: _filtered.length,
-                          separatorBuilder: (_, _) => const Divider(
-                            height: 1,
-                            indent: 20,
-                            endIndent: 20,
-                          ),
-                          itemBuilder: (context, index) {
-                            final item = _filtered[index];
-                            return ListTile(
-                              title: Text(item.title),
-                              subtitle: item.subtitle == null
-                                  ? null
-                                  : Text(item.subtitle!),
-                              onTap: () => Navigator.of(context).pop(item),
-                            );
-                          },
+                      Text(
+                        widget.emptyText,
+                        style: TypoSkin.bodyText2.copyWith(
+                          color: ColorSkin.subtitle,
                         ),
                       ),
                       if (widget.onAction != null &&
                           widget.actionLabel != null) ...[
-                        const Divider(height: 1),
+                        const SizedBox(height: 16),
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: AppButton(
                             label: widget.actionLabel!,
                             onPressed: () {
@@ -295,9 +257,50 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
                       ],
                     ],
                   ),
-          ),
-        ],
-      ),
+                )
+              : Column(
+                  children: [
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: _filtered.length,
+                        separatorBuilder: (_, _) => const Divider(
+                          height: 1,
+                          indent: 20,
+                          endIndent: 20,
+                        ),
+                        itemBuilder: (context, index) {
+                          final item = _filtered[index];
+                          return ListTile(
+                            title: Text(item.title),
+                            subtitle: item.subtitle == null
+                                ? null
+                                : Text(item.subtitle!),
+                            onTap: () => Navigator.of(context).pop(item),
+                          );
+                        },
+                      ),
+                    ),
+                    if (widget.onAction != null &&
+                        widget.actionLabel != null) ...[
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                        child: AppButton(
+                          label: widget.actionLabel!,
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            widget.onAction?.call();
+                          },
+                          variant: AppButtonVariant.primary,
+                          expand: true,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }

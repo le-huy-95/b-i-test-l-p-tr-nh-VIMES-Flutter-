@@ -68,6 +68,7 @@ class StockDocumentLoaded extends StockDocumentState {
     this.selectedId,
     this.detail,
     this.timeline = const [],
+    this.availableActions,
     this.isDetailLoading = false,
     this.isActionSubmitting = false,
     this.message,
@@ -78,6 +79,7 @@ class StockDocumentLoaded extends StockDocumentState {
   final String? selectedId;
   final StockDocument? detail;
   final List<TimelineEvent> timeline;
+  final AvailableActions? availableActions;
   final bool isDetailLoading;
   final bool isActionSubmitting;
   final String? message;
@@ -89,6 +91,7 @@ class StockDocumentLoaded extends StockDocumentState {
     selectedId,
     detail,
     timeline,
+    availableActions,
     isDetailLoading,
     isActionSubmitting,
     message,
@@ -187,6 +190,8 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     emit(_currentLoaded(isActionSubmitting: true));
     try {
       await _repository.action(_documentType, selectedId, event.body);
+      // Refresh detail + available-actions after mutation.
+      await _loadDetail(selectedId, emit, showLoading: false);
       await _loadList(
         emit,
         showLoading: false,
@@ -239,6 +244,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
 
       final cachedDetail = previousCache?.detail;
       final cachedTimeline = previousCache?.timeline ?? const <TimelineEvent>[];
+      final cachedAvailable = previousCache?.availableActions;
       final canReuseDetail =
           cachedDetail != null && cachedDetail.documentId == selectedId;
 
@@ -248,6 +254,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
           selectedId: selectedId,
           detail: cachedDetail,
           timeline: cachedTimeline,
+          availableActions: cachedAvailable,
         );
         emit(
           StockDocumentLoaded(
@@ -256,6 +263,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
             selectedId: selectedId,
             detail: cachedDetail,
             timeline: cachedTimeline,
+            availableActions: cachedAvailable,
           ),
         );
         return;
@@ -290,14 +298,22 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     try {
       final detailFuture = _repository.getDetail(type, id);
       final timelineFuture = _repository.timeline(type, id);
+      final availableFuture = _repository.availableActions(type, id);
       final detail = await detailFuture;
       final timeline = await timelineFuture;
+      AvailableActions? available;
+      try {
+        available = await availableFuture;
+      } catch (_) {
+        // available-actions is supplementary; non-fatal.
+      }
       if (epoch != _epoch) return;
       _tabCache[type] = _DocumentTabCache(
         items: _tabCache[type]?.items ?? const [],
         selectedId: id,
         detail: detail,
         timeline: timeline,
+        availableActions: available,
       );
       emit(
         StockDocumentLoaded(
@@ -306,6 +322,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
           selectedId: id,
           detail: detail,
           timeline: timeline,
+          availableActions: available,
         ),
       );
     } catch (e) {
@@ -328,6 +345,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
         selectedId: cache.selectedId,
         detail: cache.detail,
         timeline: cache.timeline,
+        availableActions: cache.availableActions,
         isDetailLoading: isDetailLoading ?? false,
         isActionSubmitting: isActionSubmitting ?? false,
         message: message,
@@ -357,6 +375,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
       selectedId: cache.selectedId,
       detail: cache.detail,
       timeline: cache.timeline,
+      availableActions: cache.availableActions,
       isDetailLoading: isDetailLoading,
       isActionSubmitting: isActionSubmitting,
       message: message,
@@ -391,10 +410,12 @@ class _DocumentTabCache {
     this.selectedId,
     this.detail,
     this.timeline = const [],
+    this.availableActions,
   });
 
   final List<StockDocument> items;
   final String? selectedId;
   final StockDocument? detail;
   final List<TimelineEvent> timeline;
+  final AvailableActions? availableActions;
 }

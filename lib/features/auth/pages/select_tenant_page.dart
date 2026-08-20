@@ -24,24 +24,75 @@ import 'package:test_y_app/shared/snackbar/simple_snackbar_service.dart';
 
 const _maxLogoBytes = 2 * 1024 * 1024;
 
+List<TenantMembership> _tenantsFromAuthState(AuthState state) {
+  return switch (state) {
+    AuthNeedsTenant(:final tenants) => tenants,
+    AuthAuthenticated(:final tenants) => tenants,
+    _ => const <TenantMembership>[],
+  };
+}
+
 class SelectTenantPage extends StatelessWidget {
   const SelectTenantPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final authState = context.read<AuthBloc>().state;
-    final tenants = switch (authState) {
-      AuthNeedsTenant(:final tenants) => tenants,
-      AuthAuthenticated(:final tenants) => tenants,
-      _ => <TenantMembership>[],
-    };
+    final seedTenants = _tenantsFromAuthState(context.read<AuthBloc>().state);
 
     return BlocProvider(
       create: (context) => TenantSelectBloc(
         authRepository: context.read<AuthRepository>(),
-        tenants: tenants,
-      )..add(const TenantSelectRefreshRequested()),
-      child: const _SelectTenantView(),
+        tenants: seedTenants,
+      ),
+      child: const _SelectTenantInitializer(child: _SelectTenantView()),
+    );
+  }
+}
+
+class _SelectTenantInitializer extends StatefulWidget {
+  const _SelectTenantInitializer({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_SelectTenantInitializer> createState() =>
+      _SelectTenantInitializerState();
+}
+
+class _SelectTenantInitializerState extends State<_SelectTenantInitializer> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncFromAuth());
+  }
+
+  void _syncFromAuth() {
+    if (!mounted) return;
+
+    final tenants = _tenantsFromAuthState(context.read<AuthBloc>().state);
+    if (tenants.isNotEmpty) {
+      context.read<TenantSelectBloc>().add(
+        TenantSelectLoadRequested(tenants),
+      );
+    }
+    context.read<TenantSelectBloc>().add(const TenantSelectRefreshRequested());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AuthBloc, AuthState>(
+      listenWhen: (previous, current) =>
+          current is AuthNeedsTenant &&
+          (previous is! AuthNeedsTenant ||
+              previous.tenants != current.tenants),
+      listener: (context, state) {
+        if (state is AuthNeedsTenant) {
+          context.read<TenantSelectBloc>().add(
+            TenantSelectLoadRequested(state.tenants),
+          );
+        }
+      },
+      child: widget.child,
     );
   }
 }
@@ -129,11 +180,7 @@ class _SelectTenantView extends StatelessWidget {
           listeners: [
             BlocListener<AuthBloc, AuthState>(
               listener: (context, state) {
-                if (state is AuthNeedsTenant) {
-                  context.read<TenantSelectBloc>().add(
-                    TenantSelectLoadRequested(state.tenants),
-                  );
-                } else if (state is AuthError) {
+                if (state is AuthError) {
                   SimpleSnackbarService.showError(state.error);
                 }
               },

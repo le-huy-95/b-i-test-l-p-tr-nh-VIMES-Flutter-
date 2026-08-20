@@ -17,7 +17,7 @@ class TenantMembership {
 
   factory TenantMembership.fromJson(Map<String, dynamic> json) {
     return TenantMembership(
-      id: (json['id'] ?? '').toString(),
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
       code: (json['code'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       role: (json['role'] ?? '').toString(),

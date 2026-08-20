@@ -31,7 +31,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final LoginUseCase _loginUseCase;
   final Logger _logger = Logger();
 
-  Future<void> _emitAfterSession(AuthSession session, Emitter<AuthState> emit) async {
+  Future<void> _emitAfterSession(
+    AuthSession session,
+    Emitter<AuthState> emit, {
+    bool navigate = true,
+  }) async {
     final saved = await _authRepository.getSelectedTenantId();
     final route = resolveTenantRoute(
       tenants: session.tenants,
@@ -47,11 +51,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           selectedTenantId: route.tenantId!,
         ),
       );
-      _safeNavigate(() => AppRouterConfig.instance.goHome());
+      if (navigate) {
+        _safeNavigate(() => AppRouterConfig.instance.goHome());
+      }
     } else {
       AppRouterConfig.instance.setAuthState(true, hasTenant: false);
       emit(AuthNeedsTenant(user: session.user, tenants: session.tenants));
-      _safeNavigate(() => AppRouterConfig.instance.goSelectTenant());
+      if (navigate) {
+        _safeNavigate(() => AppRouterConfig.instance.goSelectTenant());
+      }
     }
   }
 
@@ -105,6 +113,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           refreshToken: '',
         ),
         emit,
+        navigate: false,
       );
     } catch (e) {
       _logger.e('Auth check failed', error: e);

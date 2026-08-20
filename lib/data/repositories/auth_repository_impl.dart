@@ -29,7 +29,29 @@ class AuthRepositoryImpl implements AuthRepository {
 
   Future<void> _persistSession(AuthSession session) async {
     await _storageManager.saveUserInfo(session.user.toJson());
+    await _persistTenants(session.tenants);
     // Tokens already saved by AuthApiService on login/google/refresh.
+  }
+
+  Future<void> _persistTenants(List<TenantMembership> tenants) async {
+    await _storageManager.saveTenantMemberships(
+      tenants.map((tenant) => tenant.toJson()).toList(),
+    );
+  }
+
+  Future<List<TenantMembership>> _resolveTenants(
+    List<TenantMembership> remote,
+  ) async {
+    if (remote.isNotEmpty) {
+      await _persistTenants(remote);
+      return remote;
+    }
+
+    final cached = await _storageManager.getTenantMemberships();
+    return cached
+        .map(TenantMembership.fromJson)
+        .where((tenant) => tenant.id.isNotEmpty)
+        .toList();
   }
 
   Future<void> _registerDeviceBestEffort() async {
@@ -110,7 +132,9 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<MeResult?> getMe() async {
     try {
-      return await _apiService.getMe();
+      final me = await _apiService.getMe();
+      final tenants = await _resolveTenants(me.tenants);
+      return MeResult(user: me.user, tenants: tenants);
     } catch (_) {
       return null;
     }

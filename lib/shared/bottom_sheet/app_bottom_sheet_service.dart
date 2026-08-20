@@ -13,6 +13,13 @@ class AppBottomSheetService {
     required List<AppBottomSheetAction> actions,
     bool isDismissible = true,
     bool useRootNavigator = false,
+    bool scrollableContent = true,
+    bool showHandle = true,
+    bool showCloseButton = false,
+    VoidCallback? onClose,
+    EdgeInsetsGeometry contentPadding = const EdgeInsets.fromLTRB(20, 12, 20, 0),
+    EdgeInsetsGeometry actionsPadding = const EdgeInsets.fromLTRB(20, 20, 20, 16),
+    double maxHeightFactor = 0.85,
   }) {
     return showModalBottomSheet<T>(
       context: context,
@@ -22,16 +29,18 @@ class AppBottomSheetService {
       useRootNavigator: useRootNavigator,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
-          ),
-          child: AppBottomSheet(
-            title: title,
-            message: message,
-            content: content,
-            actions: actions,
-          ),
+        return AppBottomSheet(
+          title: title,
+          message: message,
+          content: content,
+          actions: actions,
+          scrollableContent: scrollableContent,
+          showHandle: showHandle,
+          showCloseButton: showCloseButton,
+          onClose: onClose,
+          contentPadding: contentPadding,
+          actionsPadding: actionsPadding,
+          maxHeightFactor: maxHeightFactor,
         );
       },
     );

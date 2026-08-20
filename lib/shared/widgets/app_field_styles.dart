@@ -58,7 +58,10 @@ InputDecoration appFieldDecoration({
     contentPadding: contentPadding,
     border: appFieldBorder(side: borderSide, radius: borderRadius),
     enabledBorder: appFieldBorder(side: borderSide, radius: borderRadius),
-    focusedBorder: appFieldBorder(side: focusedBorderSide, radius: borderRadius),
+    focusedBorder: appFieldBorder(
+      side: focusedBorderSide,
+      radius: borderRadius,
+    ),
     disabledBorder: appFieldBorder(
       side: const BorderSide(color: ColorSkin.grey3),
       radius: borderRadius,
@@ -81,19 +84,26 @@ class AppLabeledField extends StatelessWidget {
     required this.child,
     this.subtitle,
     this.spacing = 8,
+    this.trailing,
   });
 
   final String label;
   final String? subtitle;
   final Widget child;
   final double spacing;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: appFieldLabelStyle()),
+        Row(
+          children: [
+            Expanded(child: Text(label, style: appFieldLabelStyle())),
+            ?trailing,
+          ],
+        ),
         if (subtitle != null) ...[
           SizedBox(height: spacing),
           Text(

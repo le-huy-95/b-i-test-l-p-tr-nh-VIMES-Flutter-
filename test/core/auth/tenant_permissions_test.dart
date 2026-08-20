@@ -79,12 +79,11 @@ void main() {
       );
     });
 
-    test('pending_approval + approver → approve, delegate, reject', () {
+    test('pending_approval + approver → approve, reject', () {
       expect(
         visibleReceiptActions(status: 'pending_approval', role: 'approver'),
         [
           StockDocAction.approve,
-          StockDocAction.delegate,
           StockDocAction.reject,
         ],
       );

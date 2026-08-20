@@ -4,10 +4,17 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:test_y_app/app/router/app_router.dart';
 import 'package:test_y_app/core/auth/stock_doc_actions.dart';
+import 'package:test_y_app/core/auth/tenant_permissions.dart';
 import 'package:test_y_app/core/skin/color_skin.dart';
+import 'package:test_y_app/data/datasources/api_services/contact_api_service.dart';
 import 'package:test_y_app/data/datasources/api_services/customer_api_service.dart';
 import 'package:test_y_app/data/models/product/product.dart';
+import 'package:test_y_app/data/models/stock_document/stock_document.dart';
 import 'package:test_y_app/data/models/stock_document/stock_document_forms.dart';
+import 'package:test_y_app/domain/repositories/stock_document_repository.dart';
+import 'package:test_y_app/features/document/workflow_approval_utils.dart';
+import 'package:test_y_app/features/document/widgets/workflow_approval_bottom_sheet.dart';
+import 'package:test_y_app/features/document/widgets/workflow_signature_row.dart';
 import 'package:test_y_app/data/models/tenant/tenant_member.dart';
 import 'package:test_y_app/data/models/warehouse/warehouse.dart';
 import 'package:test_y_app/data/datasources/api_services/tenant_people_api_service.dart';
@@ -19,13 +26,15 @@ import 'package:test_y_app/features/auth/bloc/auth_bloc.dart';
 import 'package:test_y_app/features/auth/bloc/auth_state.dart';
 import 'package:test_y_app/features/document/services/stock_doc_pdf_service.dart';
 import 'package:test_y_app/features/document/widgets/partner_select_dialog.dart';
+import 'package:test_y_app/features/document/widgets/contact_create_sheet.dart';
+import 'package:test_y_app/shared/bottom_sheet/app_bottom_sheet_service.dart';
 import 'package:test_y_app/shared/snackbar/simple_snackbar_service.dart';
 import 'package:test_y_app/shared/widgets/app_button.dart';
 import 'package:test_y_app/shared/widgets/app_date_field.dart';
+import 'package:test_y_app/shared/widgets/app_field_label_action.dart';
 import 'package:test_y_app/shared/widgets/app_form_stepper.dart';
 import 'package:test_y_app/shared/widgets/app_header.dart';
 import 'package:test_y_app/shared/widgets/app_number_field.dart';
-import 'package:test_y_app/shared/widgets/app_phone_field.dart';
 import 'package:test_y_app/shared/widgets/app_text_field.dart';
 import 'package:test_y_app/shared/widgets/select_field.dart';
 
@@ -89,19 +98,13 @@ class _StockIssueFormScreen extends StatefulWidget {
 }
 
 class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
-  static const _requiredApproverCount = 3;
   final _formKey = GlobalKey<FormState>();
   final _note = TextEditingController();
   final _issueDate = TextEditingController();
-  final _deliveredByName = TextEditingController();
-  final _deliveredByPhone = TextEditingController();
-  final _deliveredByCompanyName = TextEditingController();
-  final _deliveredByNote = TextEditingController();
-  final _customerCreateCode = TextEditingController();
-  final _customerCreateName = TextEditingController();
-  final _customerCreatePhone = TextEditingController();
-  final _customerCreateEmail = TextEditingController();
-  final _workflowApproverControllers = <TextEditingController>[];
+  final _deliveryApproverController = TextEditingController();
+
+  final _warehouseKeeperController = TextEditingController();
+  final _chiefAccountantController = TextEditingController();
   final _lines = <_IssueLineDraft>[];
 
   String? _customerId;
@@ -109,6 +112,11 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   List<Product> _products = const [];
   List<PartnerSelectDialogItem> _customers = const [];
   List<TenantMember> _approvers = const [];
+
+  // Delivery contact state
+  String? _deliveryContactId;
+  List<PartnerSelectDialogItem> _deliveryContacts = const [];
+  final _contactApi = ContactApiService();
   String? _selectedWarehouseId;
   String _issueType = 'sale';
   bool _loading = true;
@@ -117,6 +125,9 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   int _currentStep = 0;
   String? _error;
   StockIssueDocumentData? _existing;
+  StockDocument? _workflow;
+  AvailableActions? _availableActions;
+  bool _workflowActionSubmitting = false;
   final Map<String, double> _productStock = {};
 
   bool get _isEdit => widget.issueId != null;
@@ -132,17 +143,9 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   void dispose() {
     _note.dispose();
     _issueDate.dispose();
-    _deliveredByName.dispose();
-    _deliveredByPhone.dispose();
-    _deliveredByCompanyName.dispose();
-    _deliveredByNote.dispose();
-    _customerCreateCode.dispose();
-    _customerCreateName.dispose();
-    _customerCreatePhone.dispose();
-    _customerCreateEmail.dispose();
-    for (final controller in _workflowApproverControllers) {
-      controller.dispose();
-    }
+    _deliveryApproverController.dispose();
+    _warehouseKeeperController.dispose();
+    _chiefAccountantController.dispose();
     super.dispose();
   }
 
@@ -180,10 +183,13 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
         }
         if (_existing != null && !_seeded) _seedFromExisting(_existing!);
         if (_lines.isEmpty) _lines.add(_IssueLineDraft());
-        _ensureApproverControllers();
+        _applyDefaultDeliveryApprover();
+        _applyDefaultChiefAccountant();
         _loading = false;
       });
       await _loadProductStock();
+      await _loadDeliveryContacts();
+      if (_isEdit) await _loadWorkflow();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -191,6 +197,148 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
         _error = _friendly(e);
       });
     }
+  }
+
+  Future<void> _loadWorkflow() async {
+    final issueId = widget.issueId;
+    if (issueId == null) return;
+    try {
+      final repo = context.read<StockDocumentRepository>();
+      final workflowFuture = repo.getDetail('stock_issue', issueId);
+      final availableFuture = repo.availableActions('stock_issue', issueId);
+      final results = await Future.wait([workflowFuture, availableFuture]);
+      if (!mounted) return;
+      final workflow = results[0] as StockDocument;
+      final available = results[1] as AvailableActions;
+      setState(() {
+        _workflow = workflow;
+        _availableActions = available;
+        seedApproverControllersFromWorkflowSteps(
+          steps: workflow.steps,
+          setDeliveryApprover: (id) => _deliveryApproverController.text = id,
+          setWarehouseKeeper: (id) => _warehouseKeeperController.text = id,
+          setChiefAccountant: (id) => _chiefAccountantController.text = id,
+          hasDeliveryApprover: () =>
+              _deliveryApproverController.text.trim().isNotEmpty,
+          hasWarehouseKeeper: () =>
+              _warehouseKeeperController.text.trim().isNotEmpty,
+          hasChiefAccountant: () =>
+              _chiefAccountantController.text.trim().isNotEmpty,
+        );
+      });
+    } catch (_) {
+      // Workflow là dữ liệu bổ sung, không chặn form.
+    }
+  }
+
+  Future<void> _submitWorkflowAction({
+    required WorkflowStep step,
+    required String action,
+    String? note,
+    String? proxySignerId,
+    List<String> authorizationIds = const [],
+  }) async {
+    final issueId = widget.issueId;
+    if (issueId == null) return;
+    setState(() => _workflowActionSubmitting = true);
+    try {
+      final body = <String, dynamic>{
+        'action': action,
+        'stepId': step.id,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        if (proxySignerId != null && proxySignerId.trim().isNotEmpty)
+          'proxySignerId': proxySignerId.trim(),
+        if (authorizationIds.isNotEmpty) 'authorizationIds': authorizationIds,
+      };
+      await context.read<StockDocumentRepository>().action(
+        'stock_issue',
+        issueId,
+        body,
+      );
+      if (!mounted) return;
+      SimpleSnackbarService.showSuccess(switch (action) {
+        'approve' => 'Đã phê duyệt phiếu',
+        'reject' => 'Đã từ chối phiếu',
+        'skip' => 'Đã bỏ qua bước này',
+        'proxy_sign' => 'Đã ký thay',
+        _ => 'Đã thực hiện hành động',
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) SimpleSnackbarService.showError(_friendly(e));
+    } finally {
+      if (mounted) setState(() => _workflowActionSubmitting = false);
+    }
+  }
+
+  Future<void> _openWorkflowApproval(WorkflowStep step, String action) async {
+    final availableActions = _availableActions;
+    final stepActions = _buildStepAvailableActions(step.id, availableActions);
+    await WorkflowApprovalBottomSheet.show(
+      context,
+      stepName: step.stepName,
+      stepId: step.id,
+      actions: stepActions,
+      fileRepository: context.read<FileRepository>(),
+      onSubmit: (selectedAction, note, proxySignerId, authorizationIds) =>
+          _submitWorkflowAction(
+            step: step,
+            action: selectedAction,
+            note: note,
+            proxySignerId: proxySignerId,
+            authorizationIds: authorizationIds,
+          ),
+    );
+  }
+
+  Widget _buildWorkflowApprovalButtons() {
+    final workflow = _workflow;
+    final userId = _currentUserId;
+    if (workflow == null || userId == null) return const SizedBox.shrink();
+
+    final buttons = <Widget>[];
+
+    for (final slot in WorkflowSignatureSlot.values) {
+      final step = workflowStepForSlot(slot, workflow.steps);
+      if (step == null) continue;
+      if (!canUserApproveSignatureSlot(
+        slot: slot,
+        steps: workflow.steps,
+        userId: userId,
+        userRole: currentTenantRoleFromAuthState(
+          context.read<AuthBloc>().state,
+        ),
+        assignedApproverIds: _buildWorkflowAssignedApproverIds(),
+        documentStatus: workflow.status,
+      )) {
+        continue;
+      }
+
+      final label = switch (slot) {
+        WorkflowSignatureSlot.deliveryApprover => 'Người giao hàng',
+        WorkflowSignatureSlot.warehouseKeeper => 'Thủ kho',
+        WorkflowSignatureSlot.chiefAccountant => 'Kế toán trưởng',
+      };
+
+      buttons.add(
+        FilledButton.tonal(
+          onPressed: _workflowActionSubmitting
+              ? null
+              : () => _openWorkflowApproval(
+                  step,
+                  _buildStepAvailableActions(
+                    step.id,
+                    _availableActions,
+                  ).firstWhere((a) => a == 'approve', orElse: () => 'approve'),
+                ),
+          child: Text('Phê duyệt — $label'),
+        ),
+      );
+    }
+
+    if (buttons.isEmpty) return const SizedBox.shrink();
+
+    return Wrap(spacing: 8, runSpacing: 8, children: buttons);
   }
 
   Future<void> _loadProductStock() async {
@@ -211,16 +359,64 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     }
   }
 
+  Future<void> _loadDeliveryContacts() async {
+    try {
+      final contacts = await _contactApi.listDeliveryPersons();
+      final items = mapDeliveryContactsToPartnerItems(contacts);
+      if (!mounted) return;
+      setState(() => _deliveryContacts = items);
+    } catch (_) {
+      // Contact list không bắt buộc
+    }
+  }
+
+  Future<List<PartnerSelectDialogItem>> _refreshDeliveryContacts() async {
+    await _loadDeliveryContacts();
+    return _deliveryContacts;
+  }
+
+  Future<void> _showContactCreateSheet() async {
+    final created = await ContactCreateSheet.show(
+      context,
+      onCreated:
+          ({
+            required String fullName,
+            String? phone,
+            String? companyName,
+            String? note,
+          }) => _contactApi.createDeliveryPerson(
+            fullName: fullName,
+            phone: phone,
+            companyName: companyName,
+            note: note,
+          ),
+    );
+    if (created == null || !mounted) return;
+    setState(() {
+      _deliveryContacts = [
+        ..._deliveryContacts,
+        PartnerSelectDialogItem(
+          id: created.id,
+          title: created.fullName,
+          subtitle: [
+            if (created.phone != null && created.phone!.isNotEmpty)
+              created.phone!,
+            if (created.companyName != null && created.companyName!.isNotEmpty)
+              created.companyName!,
+          ].join(' · '),
+        ),
+      ];
+      _deliveryContactId = created.id;
+    });
+  }
+
   void _seedFromExisting(StockIssueDocumentData existing) {
     _selectedWarehouseId = existing.warehouseId;
     _issueType = existing.issueType;
     _issueDate.text = DateFormat('dd/MM/yyyy').format(existing.issueDate);
     _customerId = existing.customerId;
     _note.text = existing.note ?? '';
-    _deliveredByName.text = '';
-    _deliveredByPhone.text = '';
-    _deliveredByCompanyName.text = '';
-    _deliveredByNote.text = '';
+    _deliveryContactId = existing.deliveredByContactId;
     _lines
       ..clear()
       ..addAll(
@@ -235,17 +431,110 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
           ),
         ),
       );
+    if (_lines.isEmpty) _lines.add(_IssueLineDraft());
     _seeded = true;
   }
 
-  void _ensureApproverControllers() {
-    while (_workflowApproverControllers.length < _requiredApproverCount) {
-      _workflowApproverControllers.add(TextEditingController());
+  void _applyDefaultDeliveryApprover() {
+    if (_deliveryApproverController.text.isNotEmpty) return;
+    final userId = _currentUserId;
+    if (userId == null) return;
+    final role = currentTenantRoleFromAuthState(context.read<AuthBloc>().state);
+    if (role == null) return;
+    final normalized = normalizeTenantRole(role);
+    if (normalized != 'warehouse_keeper' && normalized != 'admin') return;
+    _deliveryApproverController.text = userId;
+  }
+
+  void _applyDefaultChiefAccountant() {
+    if (_chiefAccountantController.text.isNotEmpty) return;
+    final userId = _currentUserId;
+    final role = currentTenantRoleFromAuthState(context.read<AuthBloc>().state);
+    if (userId == null || role == null) return;
+    if (normalizeTenantRole(role) != 'accountant') return;
+    _chiefAccountantController.text = userId;
+  }
+
+  List<String> _buildWorkflowAssignedApproverIds() {
+    final delivery = _deliveryApproverController.text.trim();
+    final warehouse = _warehouseKeeperController.text.trim();
+    final accountant = _chiefAccountantController.text.trim();
+    // Slot giao hàng không còn chọn trên form — fallback thủ kho.
+    return [delivery.isNotEmpty ? delivery : warehouse, warehouse, accountant];
+  }
+
+  List<String> _buildStepAvailableActions(
+    String stepId,
+    AvailableActions? available,
+  ) {
+    if (available == null) return ['approve', 'reject'];
+    if (available.currentStepId == stepId) {
+      return available.actions;
     }
-    while (_workflowApproverControllers.length > _requiredApproverCount) {
-      final controller = _workflowApproverControllers.removeLast();
-      controller.dispose();
+    // If this step is not the current step, return empty
+    return [];
+  }
+
+  Map<String, StepAvailableActions>? _buildStepAvailableActionsMap(
+    List<WorkflowStep> steps,
+    AvailableActions? available,
+  ) {
+    if (available == null) return null;
+    final map = <String, StepAvailableActions>{};
+    for (final step in steps) {
+      if (available.currentStepId == step.id) {
+        map[step.id] = StepAvailableActions(
+          stepId: step.id,
+          actions: available.actions,
+        );
+      }
     }
+    return map;
+  }
+
+  List<TenantMember> _membersForRole(String role) {
+    final normalized = normalizeTenantRole(role);
+    return _approvers.where((member) {
+      final memberRole = normalizeTenantRole(member.role);
+      return memberRole == normalized || memberRole == 'admin';
+    }).toList();
+  }
+
+  String? _memberDisplayName(String userId) {
+    if (userId.trim().isEmpty) return null;
+    for (final member in _approvers) {
+      if (member.userId == userId) return member.name ?? member.userId;
+    }
+    return userId;
+  }
+
+  Widget _buildApproverSelectField({
+    required String label,
+    required TextEditingController controller,
+    required List<TenantMember> members,
+    Widget? labelTrailing,
+  }) {
+    return AppSelectField<AppSelectItem>(
+      label: label,
+      labelTrailing: labelTrailing,
+      value: controller.text.isEmpty ? null : controller.text,
+      hint: 'Chọn $label',
+      bottomSheetTitle: 'Chọn $label',
+      searchHint: 'Tìm user',
+      items: [
+        for (final member in members)
+          AppSelectItem(
+            id: member.userId,
+            title: member.name ?? member.userId,
+            subtitle: [
+              tenantRoleLabel(member.role),
+              if ((member.phone ?? '').isNotEmpty) member.phone!,
+              if ((member.email ?? '').isNotEmpty) member.email!,
+            ].join(' · '),
+          ),
+      ],
+      onChanged: (value) => setState(() => controller.text = value ?? ''),
+    );
   }
 
   void _addLine() => setState(() => _lines.add(_IssueLineDraft()));
@@ -307,9 +596,21 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       }
       return false;
     }
-    if (_deliveredByName.text.trim().isEmpty) {
+    if (_deliveryContactId == null || _deliveryContactId!.trim().isEmpty) {
       if (showError) {
-        SimpleSnackbarService.showError('Vui lòng nhập người giao hàng');
+        SimpleSnackbarService.showError('Vui lòng chọn người giao hàng');
+      }
+      return false;
+    }
+    if (_warehouseKeeperController.text.trim().isEmpty) {
+      if (showError) {
+        SimpleSnackbarService.showError('Vui lòng chọn thủ kho');
+      }
+      return false;
+    }
+    if (_chiefAccountantController.text.trim().isEmpty) {
+      if (showError) {
+        SimpleSnackbarService.showError('Vui lòng chọn kế toán trưởng');
       }
       return false;
     }
@@ -417,6 +718,12 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   Future<void> _save() async {
     if (!_validate()) return;
 
+    // Lấy thông tin người giao hàng đã chọn
+    final selectedContact = _deliveryContacts
+        .cast<PartnerSelectDialogItem?>()
+        .firstWhere((c) => c?.id == _deliveryContactId, orElse: () => null);
+    final deliveredByName = selectedContact?.title ?? '';
+
     final body = <String, dynamic>{
       'warehouseId': _selectedWarehouseId,
       'issueType': _issueType,
@@ -425,22 +732,11 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
         'customerId': _customerId!.trim(),
       if (_note.text.trim().isNotEmpty) 'note': _note.text.trim(),
       'deliveredBy': {
-        'contactId': '',
+        'contactId': _deliveryContactId ?? '',
         'kind': 'external',
-        'fullName': _deliveredByName.text.trim(),
-        'phone': _deliveredByPhone.text.trim(),
-        'companyName': _deliveredByCompanyName.text.trim(),
-        if (_deliveredByNote.text.trim().isNotEmpty)
-          'note': _deliveredByNote.text.trim(),
+        'fullName': deliveredByName,
       },
-      'assignedApproverIds': [
-        for (final controller in _workflowApproverControllers)
-          controller.text.trim(),
-      ],
-      'workflowAssignedApproverIds': [
-        for (final controller in _workflowApproverControllers)
-          controller.text.trim(),
-      ],
+      'workflowAssignedApproverIds': _buildWorkflowAssignedApproverIds(),
       'lines': _lines.map((line) => line.toJson()).toList(),
     };
 
@@ -584,12 +880,21 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     return _tenantName;
   }
 
+  String? get _currentUserId {
+    final auth = context.read<AuthBloc>().state;
+    if (auth is AuthAuthenticated && auth.user.id.isNotEmpty) {
+      return auth.user.id;
+    }
+    return null;
+  }
+
   Future<void> _showCreateCustomerSheet() async {
-    final created = await showModalBottomSheet<CustomerOption>(
+    final created = await AppBottomSheetService.show<CustomerOption>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => PartnerCreateSheet(
+      showHandle: false,
+      contentPadding: EdgeInsets.zero,
+      actions: const [],
+      content: PartnerCreateSheet(
         title: 'Tạo khách hàng',
         codeLabel: 'Mã khách hàng',
         nameLabel: 'Tên khách hàng',
@@ -634,22 +939,11 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   }
 
   String _formatNum(double value) {
-    final rounded = value.roundToDouble();
-    final isWhole = (value - rounded).abs() < 0.0000001;
-    final raw = isWhole ? rounded.toInt().toString() : value.toStringAsFixed(2);
-    final dotIndex = raw.indexOf('.');
-    final intPart = dotIndex >= 0 ? raw.substring(0, dotIndex) : raw;
-    final decPart = dotIndex >= 0
-        ? raw.substring(dotIndex + 1).replaceFirst(RegExp(r'0+$'), '')
-        : '';
-    final buffer = StringBuffer();
-    for (var i = 0; i < intPart.length; i++) {
-      buffer.write(intPart[i]);
-      final remaining = intPart.length - 1 - i;
-      if (remaining > 0 && remaining % 3 == 0) buffer.write('.');
-    }
-    if (decPart.isNotEmpty) buffer.write('.$decPart');
-    return buffer.toString();
+    if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+    return value
+        .toStringAsFixed(4)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   String _vietnameseWords(num value) {
@@ -722,13 +1016,23 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     return total;
   }
 
-  Widget _buildSectionTitle(String title, {String? subtitle}) {
+  Widget _buildSectionTitle(
+    String title, {
+    String? subtitle,
+    Widget? trailing,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            ?trailing,
+          ],
         ),
         if (subtitle != null) ...[
           const SizedBox(height: 4),
@@ -744,7 +1048,7 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       children: [
         _buildSectionTitle(
           'Thông tin chung',
-          subtitle: 'Chọn kho, nhà cung cấp và ngày phiếu',
+          subtitle: 'Chọn kho, khách hàng và ngày phiếu',
         ),
         const SizedBox(height: 12),
         AppSelectField<AppSelectItem>(
@@ -779,45 +1083,21 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
         const SizedBox(height: 12),
         AppSelectField<PartnerSelectDialogItem>(
           label: 'Khách hàng',
+          labelTrailing: AppFieldLabelAction(
+            tooltip: 'Tạo khách hàng',
+            onPressed: _showCreateCustomerSheet,
+          ),
           value: _customerId,
           hint: 'Chọn khách hàng',
           bottomSheetTitle: 'Chọn khách hàng',
           searchHint: 'Tìm khách hàng',
           items: _customers,
-          actionLabel: 'Tạo khách hàng',
-          onAction: _showCreateCustomerSheet,
           onChanged: (value) async {
             if (value == null) return;
             setState(() {
               _customerId = value;
             });
           },
-        ),
-        const SizedBox(height: 12),
-        AppTextField(
-          label: 'Người giao hàng',
-          controller: _deliveredByName,
-          hintText: 'Nhập họ tên người giao hàng',
-          required: true,
-        ),
-        const SizedBox(height: 12),
-        AppPhoneField(
-          label: 'SĐT người giao hàng',
-          controller: _deliveredByPhone,
-          hintText: 'Nhập số điện thoại',
-        ),
-        const SizedBox(height: 12),
-        AppTextField(
-          label: 'Công ty/Đơn vị giao hàng',
-          controller: _deliveredByCompanyName,
-          hintText: 'Nhập công ty hoặc đơn vị',
-        ),
-        const SizedBox(height: 12),
-        AppTextField(
-          label: 'Ghi chú người giao',
-          controller: _deliveredByNote,
-          hintText: 'Nhập ghi chú cho người giao',
-          maxLines: 2,
         ),
         const SizedBox(height: 12),
         AppTextField(
@@ -834,36 +1114,48 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
           enabled: false,
         ),
         const SizedBox(height: 12),
-        _buildSectionTitle('Người duyệt nội bộ', subtitle: 'Chọn người duyệt'),
+        AppSelectField<PartnerSelectDialogItem>(
+          label: 'Người giao hàng',
+          labelTrailing: AppFieldLabelAction(
+            tooltip: 'Thêm người giao hàng',
+            onPressed: _showContactCreateSheet,
+          ),
+          value: _deliveryContactId,
+          hint: _deliveryContacts.isEmpty
+              ? 'Chưa có người giao hàng'
+              : 'Chọn người giao hàng',
+          bottomSheetTitle: 'Người giao hàng',
+          searchHint: 'Tìm theo tên, SĐT, công ty',
+          items: _deliveryContacts,
+          actionLabel: 'Thêm người giao hàng',
+          onAction: _showContactCreateSheet,
+          onBeforeOpen: _refreshDeliveryContacts,
+          onChanged: (value) {
+            setState(() => _deliveryContactId = value);
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildSectionTitle(
+          'Người duyệt nội bộ',
+          subtitle: 'Chọn thủ kho và kế toán trưởng',
+        ),
         const SizedBox(height: 12),
         if (_approvers.isEmpty)
           const Text('Chưa tải được danh sách người duyệt phù hợp'),
-        for (var i = 0; i < _requiredApproverCount; i++) ...[
-          AppSelectField<AppSelectItem>(
-            label: 'Người duyệt ${i + 1}',
-            value: _workflowApproverControllers[i].text.isEmpty
-                ? null
-                : _workflowApproverControllers[i].text,
-            hint: 'Chọn người duyệt',
-            bottomSheetTitle: 'Chọn người duyệt',
-            searchHint: 'Tìm user',
-            items: [
-              for (final member in _approvers)
-                AppSelectItem(
-                  id: member.userId,
-                  title: member.name ?? member.userId,
-                  subtitle: [
-                    member.role,
-                    if ((member.phone ?? '').isNotEmpty) member.phone!,
-                    if ((member.email ?? '').isNotEmpty) member.email!,
-                  ].join(' · '),
-                ),
-            ],
-            onChanged: (value) => setState(
-              () => _workflowApproverControllers[i].text = value ?? '',
-            ),
+        if (_approvers.isNotEmpty) ...[
+          _buildApproverSelectField(
+            label: 'Thủ kho',
+            controller: _warehouseKeeperController,
+            members: _membersForRole('warehouse_keeper'),
           ),
           const SizedBox(height: 12),
+          _buildApproverSelectField(
+            label: 'Kế toán trưởng',
+            controller: _chiefAccountantController,
+            members: _membersForRole('accountant'),
+          ),
+          const SizedBox(height: 16),
+          _buildWorkflowApprovalButtons(),
         ],
       ],
     );
@@ -873,9 +1165,20 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Dòng hàng',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'hàng hóa ',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            if (_products.isNotEmpty)
+              TextButton.icon(
+                onPressed: _navigateToCreateProduct,
+                icon: const Icon(Icons.add, color: ColorSkin.primary),
+                label: const Text('Thêm SP'),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         if (_products.isEmpty)
@@ -889,24 +1192,17 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
               productStock: _productStock,
               onChanged: () => setState(() {}),
               onRemove: _lines.length > 1 ? () => _removeLine(i) : null,
+              formatNum: _formatNum,
             ),
             if (i != _lines.length - 1) const Divider(height: 32),
           ],
-        if (_products.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          AppButton(
-            label: 'Thêm sản phẩm',
-            onPressed: _navigateToCreateProduct,
-            variant: AppButtonVariant.outlined,
-            icon: const Icon(Icons.add, color: ColorSkin.primary),
-          ),
-        ],
       ],
     );
   }
 
   Widget _buildEmptyProductsState() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 8),
         const Icon(
@@ -956,6 +1252,8 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     }
   }
 
+  static const double _docPreviewWidth = 568;
+
   Widget _buildReview() {
     final date =
         DateTime.tryParse(_toIsoDate(_issueDate.text)) ?? DateTime.now();
@@ -965,6 +1263,39 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
         ? '………………………………'
         : '${warehouse.code} · ${warehouse.name}';
     final address = warehouse?.address?.trim();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportWidth = constraints.maxWidth;
+        final containerWidth = viewportWidth < _docPreviewWidth
+            ? _docPreviewWidth
+            : viewportWidth;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: containerWidth,
+            child: Center(
+              child: SizedBox(
+                width: _docPreviewWidth,
+                child: _buildReviewDocument(
+                  date: date,
+                  code: code,
+                  location: location,
+                  address: address,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildReviewDocument({
+    required DateTime date,
+    required String code,
+    required String location,
+    String? address,
+  }) {
     return DefaultTextStyle.merge(
       style: const TextStyle(fontSize: 10.5, height: 1.25, color: Colors.black),
       child: Column(
@@ -1043,7 +1374,6 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Text('- Họ và tên người nhận hàng: ${_customerDisplayName()}'),
           Text('- Lý do xuất: ${issueTypeLabel(_issueType)}'),
           Text(
             '- Xuất tại kho (ngăn lô): $location, địa điểm: ${address == null || address.isEmpty ? '…………………' : address}',
@@ -1066,12 +1396,16 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
           _buildSignatureRow(
             const [
               'Người lập phiếu',
-              'Người nhận hàng',
               'Thủ kho',
               'Kế toán trưởng',
-              'Giám đốc',
             ],
-            signatureNames: {'Người lập phiếu': _currentUserName ?? ''},
+            signatureNames: {
+              'Người lập phiếu': _currentUserName ?? '',
+              'Thủ kho':
+                  _memberDisplayName(_warehouseKeeperController.text) ?? '',
+              'Kế toán trưởng':
+                  _memberDisplayName(_chiefAccountantController.text) ?? '',
+            },
           ),
         ],
       ),
@@ -1090,25 +1424,27 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     return Text(text, textAlign: align, style: const TextStyle(fontSize: 8));
   }
 
-  Widget _docRow(List<(double, Widget)> cells) {
+  Widget _docRow(List<(int, Widget)> cells) {
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (var i = 0; i < cells.length; i++)
-            Container(
-              width: cells[i].$1,
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
-              decoration: BoxDecoration(
-                border: Border(
-                  left: i == 0
-                      ? const BorderSide(color: Colors.black45)
-                      : BorderSide.none,
-                  right: const BorderSide(color: Colors.black45),
-                  bottom: const BorderSide(color: Colors.black45),
+            Expanded(
+              flex: cells[i].$1,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: i == 0
+                        ? const BorderSide(color: Colors.black45)
+                        : BorderSide.none,
+                    right: const BorderSide(color: Colors.black45),
+                    bottom: const BorderSide(color: Colors.black45),
+                  ),
                 ),
+                child: Center(child: cells[i].$2),
               ),
-              child: Center(child: cells[i].$2),
             ),
         ],
       ),
@@ -1118,29 +1454,29 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   Widget _buildDocTable() {
     final rows = <Widget>[
       _docRow([
-        (32.0, _docHeaderText('STT')),
+        (32, _docHeaderText('STT')),
         (
-          168.0,
+          168,
           _docHeaderText(
             'Tên, nhãn hiệu, quy cách, phẩm chất vật tư, dụng cụ, sản phẩm, hàng hóa',
           ),
         ),
-        (60.0, _docHeaderText('Mã số')),
-        (52.0, _docHeaderText('Đơn vị tính')),
-        (56.0, _docHeaderText('Số lượng\nYêu cầu')),
-        (56.0, _docHeaderText('Số lượng\nThực xuất')),
-        (64.0, _docHeaderText('Đơn giá')),
-        (80.0, _docHeaderText('Thành tiền')),
+        (60, _docHeaderText('Mã số')),
+        (52, _docHeaderText('Đơn vị tính')),
+        (56, _docHeaderText('Số lượng\nYêu cầu')),
+        (56, _docHeaderText('Số lượng\nThực xuất')),
+        (64, _docHeaderText('Đơn giá')),
+        (80, _docHeaderText('Thành tiền')),
       ]),
       _docRow([
-        (32.0, _cellText('A')),
-        (168.0, _cellText('B')),
-        (60.0, _cellText('C')),
-        (52.0, _cellText('D')),
-        (56.0, _cellText('1')),
-        (56.0, _cellText('2')),
-        (64.0, _cellText('3')),
-        (80.0, _cellText('4')),
+        (32, _cellText('A')),
+        (168, _cellText('B')),
+        (60, _cellText('C')),
+        (52, _cellText('D')),
+        (56, _cellText('1')),
+        (56, _cellText('2')),
+        (64, _cellText('3')),
+        (80, _cellText('4')),
       ]),
     ];
 
@@ -1152,34 +1488,29 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       final price = double.tryParse(line.unitPrice.trim()) ?? 0;
       rows.add(
         _docRow([
-          (32.0, _cellText('${i + 1}')),
+          (32, _cellText('${i + 1}')),
           (
-            168.0,
+            168,
             _cellText(
               product?.name ?? (line.productId.isEmpty ? '—' : line.productId),
               align: TextAlign.left,
             ),
           ),
-          (60.0, _cellText(product?.sku ?? '—')),
-          (52.0, _cellText(line.unitName)),
-          (56.0, _cellText(_formatNum(requested))),
-          (56.0, _cellText(_formatNum(actual))),
-          (64.0, _cellText(_formatNum(price))),
-          (80.0, _cellText(_formatNum(actual * price))),
+          (60, _cellText(product?.sku ?? '—')),
+          (52, _cellText(line.unitName)),
+          (56, _cellText(_formatNum(requested))),
+          (56, _cellText(_formatNum(actual))),
+          (64, _cellText(_formatNum(price))),
+          (80, _cellText(_formatNum(actual * price))),
         ]),
       );
     }
 
-    const tableWidth = 568.0;
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.topLeft,
-      child: SizedBox(
-        width: tableWidth,
-        child: Container(
-          decoration: BoxDecoration(border: Border.all(color: Colors.black45)),
-          child: Column(mainAxisSize: MainAxisSize.min, children: rows),
-        ),
+    return SizedBox(
+      width: _docPreviewWidth,
+      child: Container(
+        decoration: BoxDecoration(border: Border.all(color: Colors.black45)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: rows),
       ),
     );
   }
@@ -1188,12 +1519,35 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
     List<String> roles, {
     Map<String, String>? signatureNames,
   }) {
+    final workflow = _workflow;
+    if (workflow != null && workflow.steps.isNotEmpty) {
+      return WorkflowSignatureRow(
+        roles: roles,
+        signatureNames: signatureNames,
+        steps: workflow.steps,
+        assignedApproverIds: _buildWorkflowAssignedApproverIds(),
+        documentStatus: workflow.status,
+        currentUserId: _currentUserId,
+        currentUserRole: currentTenantRoleFromAuthState(
+          context.read<AuthBloc>().state,
+        ),
+        actionSubmitting: _workflowActionSubmitting,
+        onActionTap: _openWorkflowApproval,
+        fitOnOneLine: _fitOnOneLine,
+        stepAvailableActions: _buildStepAvailableActionsMap(
+          workflow.steps,
+          _availableActions,
+        ),
+      );
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (final role in roles)
           Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _fitOnOneLine(
                   Text(
@@ -1206,11 +1560,13 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
                   ),
                 ),
                 const SizedBox(height: 30),
-                if (signatureNames?[role] != null &&
-                    signatureNames![role]!.isNotEmpty) ...[
-                  _fitOnOneLine(
+                SizedBox(
+                  height: 14,
+                  child: _fitOnOneLine(
                     Text(
-                      signatureNames[role]!,
+                      signatureNames?[role]?.trim().isNotEmpty == true
+                          ? signatureNames![role]!
+                          : '',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 8.5,
@@ -1218,8 +1574,8 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                ],
+                ),
+                const SizedBox(height: 4),
                 _fitOnOneLine(
                   const Text(
                     '(Ký, họ tên)',
@@ -1235,7 +1591,14 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
   }
 
   Widget _fitOnOneLine(Widget child) {
-    return FittedBox(fit: BoxFit.scaleDown, child: child);
+    return SizedBox(
+      width: double.infinity,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.center,
+        child: child,
+      ),
+    );
   }
 
   List<Widget> _buildStepContent() {
@@ -1319,18 +1682,6 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                FloatingActionButton.extended(
-                  heroTag: 'issue_add_product',
-                  onPressed: _navigateToCreateProduct,
-                  backgroundColor: ColorSkin.primary,
-                  foregroundColor: ColorSkin.white,
-                  icon: const Icon(Icons.add, color: ColorSkin.white),
-                  label: const Text(
-                    'Thêm SP',
-                    style: TextStyle(color: ColorSkin.white),
-                  ),
-                ),
-                const SizedBox(height: 12),
                 FloatingActionButton(
                   heroTag: 'issue_add',
                   backgroundColor: ColorSkin.primary,
@@ -1421,6 +1772,7 @@ class _IssueLineItem extends StatelessWidget {
     required this.products,
     required this.productStock,
     required this.onChanged,
+    required this.formatNum,
     this.onRemove,
   });
 
@@ -1429,15 +1781,8 @@ class _IssueLineItem extends StatelessWidget {
   final List<Product> products;
   final Map<String, double> productStock;
   final VoidCallback onChanged;
+  final String Function(double value) formatNum;
   final VoidCallback? onRemove;
-
-  String _formatNum(double value) {
-    if (value == value.roundToDouble()) return value.toStringAsFixed(0);
-    return value
-        .toStringAsFixed(4)
-        .replaceFirst(RegExp(r'0+$'), '')
-        .replaceFirst(RegExp(r'\.$'), '');
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1488,7 +1833,6 @@ class _IssueLineItem extends StatelessWidget {
           ],
           onChanged: (value) {
             draft.productId = value ?? '';
-            onChanged();
 
             // Tự động điền giá gốc khi chọn sản phẩm
             Product? product;
@@ -1498,15 +1842,19 @@ class _IssueLineItem extends StatelessWidget {
                 break;
               }
             }
-            if (product != null && product.averageCost > 0) {
-              draft.unitPrice = product.averageCost.toString();
+            if (product != null) {
+              draft.unitPrice = product.averageCost > 0
+                  ? formatNum(product.averageCost)
+                  : '';
             }
+
+            onChanged();
           },
         ),
         const SizedBox(height: 8),
         if (draft.productId.isNotEmpty)
           Text(
-            'Tồn kho thực tế: ${_formatNum(available)}',
+            'Tồn kho thực tế: ${formatNum(available)}',
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
@@ -1551,11 +1899,10 @@ class _IssueLineItem extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         AppPriceField(
-          label: 'Đơn giá',
+          label: 'Tiền mặt',
           initialValue: draft.unitPrice,
           hintText: '0',
           onChanged: (value) => draft.unitPrice = value,
-          nonNegative: true,
         ),
       ],
     );

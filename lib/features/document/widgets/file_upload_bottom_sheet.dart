@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:test_y_app/core/skin/color_skin.dart';
+import 'package:test_y_app/shared/bottom_sheet/app_bottom_sheet_service.dart';
 import 'package:test_y_app/data/models/uploaded_file.dart';
 import 'package:test_y_app/domain/repositories/file_repository.dart';
 import 'package:test_y_app/shared/snackbar/simple_snackbar_service.dart';
@@ -23,14 +24,16 @@ class FileUploadBottomSheet extends StatefulWidget {
     required String kind,
     List<String> allowKinds = const ['image', 'pdf'],
   }) {
-    return showModalBottomSheet<UploadedFile>(
+    return AppBottomSheetService.show<UploadedFile>(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => FileUploadBottomSheet(
+      showHandle: false,
+      contentPadding: EdgeInsets.zero,
+      content: FileUploadBottomSheet(
         repository: repository,
         kind: kind,
         allowKinds: allowKinds,
       ),
+      actions: const [],
     );
   }
 
@@ -85,17 +88,22 @@ class _FileUploadBottomSheetState extends State<FileUploadBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
+    return Material(
+      color: ColorSkin.white,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      clipBehavior: Clip.antiAlias,
       child: SafeArea(
+        top: false,
         child: Container(
           padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Upload file giấy ủy quyền', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              const Text(
+                'Upload file giấy ủy quyền',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: _uploading ? null : _pick,
@@ -104,7 +112,9 @@ class _FileUploadBottomSheetState extends State<FileUploadBottomSheet> {
               ),
               if (_picked != null) ...[
                 const SizedBox(height: 8),
-                Text('Dung lượng: ${(_picked!.size / (1024 * 1024)).toStringAsFixed(2)} MB'),
+                Text(
+                  'Dung lượng: ${(_picked!.size / (1024 * 1024)).toStringAsFixed(2)} MB',
+                ),
               ],
               if (_error != null) ...[
                 const SizedBox(height: 8),

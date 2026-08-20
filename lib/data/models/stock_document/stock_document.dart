@@ -105,6 +105,54 @@ class TimelineEvent {
       );
 }
 
+/// Available actions for a workflow document, returned by
+/// `GET /document-workflows/:documentType/:documentId/available-actions`.
+class AvailableActions {
+  const AvailableActions({
+    required this.documentId,
+    required this.documentType,
+    required this.status,
+    this.currentStepId,
+    this.currentStepCode,
+    this.currentStepName,
+    this.currentStepAssignedApproverId,
+    this.actions = const [],
+  });
+
+  final String documentId;
+  final String documentType;
+  final String status;
+  final String? currentStepId;
+  final String? currentStepCode;
+  final String? currentStepName;
+  final String? currentStepAssignedApproverId;
+  final List<String> actions;
+
+  bool get canSubmit => actions.contains('submit');
+  bool get canApprove => actions.contains('approve');
+  bool get canReject => actions.contains('reject');
+  bool get canSkip => actions.contains('skip');
+  bool get canProxySign => actions.contains('proxy_sign');
+  bool get canComplete => actions.contains('complete');
+  bool get canCancel => actions.contains('cancel');
+
+  factory AvailableActions.fromJson(Map<String, dynamic> json) {
+    final rawActions = json['actions'];
+    return AvailableActions(
+      documentId: '${json['documentId'] ?? ''}',
+      documentType: '${json['documentType'] ?? ''}',
+      status: '${json['status'] ?? ''}',
+      currentStepId: json['currentStepId']?.toString(),
+      currentStepCode: json['currentStepCode']?.toString(),
+      currentStepName: json['currentStepName']?.toString(),
+      currentStepAssignedApproverId: json['currentStepAssignedApproverId']?.toString(),
+      actions: rawActions is List
+          ? rawActions.map((e) => e.toString()).toList()
+          : const [],
+    );
+  }
+}
+
 DateTime? _parseDate(dynamic value) {
   if (value == null) return null;
   final text = value.toString();

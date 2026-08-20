@@ -53,6 +53,7 @@ class ApiEndpoints {
   static String stockReceipt(String id) => '$stockReceipts/$id';
   static const String customers = '$baseApi/customers';
   static const String suppliers = '$baseApi/suppliers';
+  static const String tenantContacts = '$baseApi/tenant/contacts';
 
   static const String organizationOverview =
       '$baseApi/reports/organization-overview';
@@ -74,6 +75,8 @@ class ApiEndpoints {
       '$documentWorkflows/$documentType/$id/steps/$stepId/authorizations';
   static String workflowTimeline(String documentType, String id) =>
       '$documentWorkflows/$documentType/$id/timeline';
+  static String workflowAvailableActions(String documentType, String id) =>
+      '$documentWorkflows/$documentType/$id/available-actions';
 
   static String get notifApiBase => EnvConfig.notificationApiUrl;
   static String get notifUnreadCount => '$notifApiBase/notifications/unread-count';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:test_y_app/core/skin/color_skin.dart';
 import 'package:test_y_app/data/datasources/api_services/customer_api_service.dart';
 import 'package:test_y_app/data/datasources/api_services/supplier_api_service.dart';
+import 'package:test_y_app/data/datasources/api_services/contact_api_service.dart';
 import 'package:test_y_app/shared/validators/form_validators.dart';
 import 'package:test_y_app/shared/widgets/app_button.dart';
 import 'package:test_y_app/shared/widgets/app_form_field.dart';
@@ -25,6 +26,25 @@ Future<List<PartnerSelectDialogItem>> mapCustomersToPartnerItems() async {
           subtitle: [
             if (c.code != null && c.code!.isNotEmpty) c.code,
             if (c.phone != null && c.phone!.isNotEmpty) c.phone,
+          ].join(' · '),
+        ),
+      )
+      .toList();
+}
+
+List<PartnerSelectDialogItem> mapDeliveryContactsToPartnerItems(
+  List<DeliveryContact> contacts,
+) {
+  return contacts
+      .where((contact) => contact.isActive)
+      .map(
+        (contact) => PartnerSelectDialogItem(
+          id: contact.id,
+          title: contact.fullName,
+          subtitle: [
+            if (contact.phone != null && contact.phone!.isNotEmpty) contact.phone,
+            if (contact.companyName != null && contact.companyName!.isNotEmpty)
+              contact.companyName,
           ].join(' · '),
         ),
       )
@@ -126,50 +146,58 @@ class _PartnerCreateSheetState extends State<PartnerCreateSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: ColorSkin.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ColorSkin.grey3,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  widget.title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: ColorSkin.title,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
             child: Form(
               key: _formKey,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: ColorSkin.grey3,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    widget.title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: ColorSkin.title,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
                   AppFormField(
                     label: '${widget.codeLabel} *',
                     controller: _codeController,
                     hintText: 'Nhập ${widget.codeLabel.toLowerCase()}',
                     enabled: !_saving,
-                    validator: (v) =>
-                        requiredValidator(v, label: widget.codeLabel),
+                    validator: (v) => requiredValidator(
+                      v,
+                      label: widget.codeLabel,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   AppFormField(
@@ -177,8 +205,10 @@ class _PartnerCreateSheetState extends State<PartnerCreateSheet> {
                     controller: _nameController,
                     hintText: 'Nhập ${widget.nameLabel.toLowerCase()}',
                     enabled: !_saving,
-                    validator: (v) =>
-                        requiredValidator(v, label: widget.nameLabel),
+                    validator: (v) => requiredValidator(
+                      v,
+                      label: widget.nameLabel,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   for (final field in widget.extraFields)
@@ -204,34 +234,41 @@ class _PartnerCreateSheetState extends State<PartnerCreateSheet> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppButton(
-                          label: 'Hủy',
-                          onPressed: _saving
-                              ? null
-                              : () => Navigator.of(context).pop(),
-                          variant: AppButtonVariant.outlined,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: AppButton(
-                          label: 'Tạo',
-                          onPressed: _saving ? null : _submit,
-                          variant: AppButtonVariant.primary,
-                          isLoading: _saving,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
           ),
-        ),
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+            decoration: const BoxDecoration(
+              color: ColorSkin.white,
+              border: Border(
+                top: BorderSide(color: ColorSkin.border1),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: 'Hủy',
+                    onPressed:
+                        _saving ? null : () => Navigator.of(context).pop(),
+                    variant: AppButtonVariant.outlined,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppButton(
+                    label: 'Tạo',
+                    onPressed: _saving ? null : _submit,
+                    variant: AppButtonVariant.primary,
+                    isLoading: _saving,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

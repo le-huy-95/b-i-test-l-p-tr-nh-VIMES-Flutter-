@@ -1,3 +1,4 @@
+import 'package:test_y_app/data/models/auth/me_result.dart';
 import 'package:test_y_app/data/models/tenant/tenant_membership.dart';
 import 'package:test_y_app/data/models/user/user.dart';
 
@@ -18,7 +19,6 @@ class AuthSession {
 
   factory AuthSession.fromJson(Map<String, dynamic> json) {
     final userJson = json['user'];
-    final tenantsJson = json['tenants'];
 
     return AuthSession(
       user: User.fromJson(
@@ -26,12 +26,7 @@ class AuthSession {
             ? userJson
             : Map<String, dynamic>.from(userJson as Map? ?? {}),
       ),
-      tenants: tenantsJson is List
-          ? tenantsJson
-              .whereType<Map>()
-              .map((e) => TenantMembership.fromJson(Map<String, dynamic>.from(e)))
-              .toList()
-          : const [],
+      tenants: MeResult.parseTenantMemberships(json),
       accessToken: (json['accessToken'] ?? '').toString(),
       refreshToken: (json['refreshToken'] ?? '').toString(),
       isNewUser: json['isNewUser'] as bool?,

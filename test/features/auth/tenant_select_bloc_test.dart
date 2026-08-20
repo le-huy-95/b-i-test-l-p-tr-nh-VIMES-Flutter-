@@ -36,6 +36,21 @@ void main() {
 
   group('TenantSelectRefreshRequested', () {
     blocTest<TenantSelectBloc, TenantSelectState>(
+      'refresh empty response keeps existing tenants',
+      build: () {
+        when(() => authRepository.fetchMyTenants()).thenAnswer((_) async => []);
+        return buildBloc(tenants: [fakeTenant('t1')]);
+      },
+      act: (bloc) => bloc.add(const TenantSelectRefreshRequested()),
+      expect: () => [
+        isA<TenantSelectRefreshing>(),
+        isA<TenantSelectInitial>()
+            .having((s) => s.tenants.first.id, 'tenant id', 't1')
+            .having((s) => s.tenants.length, 'count', 1),
+      ],
+    );
+
+    blocTest<TenantSelectBloc, TenantSelectState>(
       'refresh success updates tenant list',
       build: () {
         when(() => authRepository.fetchMyTenants()).thenAnswer(

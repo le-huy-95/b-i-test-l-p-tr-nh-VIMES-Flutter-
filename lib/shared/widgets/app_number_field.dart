@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:test_y_app/core/constants/env_config.dart';
+import 'package:test_y_app/shared/formatters/money_formatters.dart';
 import 'package:test_y_app/shared/validators/form_validators.dart';
 import 'package:test_y_app/shared/widgets/app_form_field.dart';
 
@@ -69,8 +70,10 @@ class AppNumberField extends StatelessWidget {
   }
 }
 
-/// Field số tiền (định dạng VND, không thập phân).
-class AppPriceField extends StatelessWidget {
+/// Field số tiền (định dạng VND, dấu chấm ngăn nghìn, không thập phân).
+///
+/// [initialValue] và [onChanged] dùng chuỗi số thô (không dấu ngăn cách).
+class AppPriceField extends StatefulWidget {
   const AppPriceField({
     super.key,
     required this.label,
@@ -91,15 +94,53 @@ class AppPriceField extends StatelessWidget {
   final String? suffixText;
 
   @override
+  State<AppPriceField> createState() => _AppPriceFieldState();
+}
+
+class _AppPriceFieldState extends State<AppPriceField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: formatMoneyRaw(widget.initialValue ?? ''),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant AppPriceField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialValue != oldWidget.initialValue) {
+      final next = formatMoneyRaw(widget.initialValue ?? '');
+      if (parseMoneyRaw(_controller.text) != parseMoneyRaw(next)) {
+        _controller.text = next;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleChanged(String formatted) {
+    widget.onChanged?.call(parseMoneyRaw(formatted));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AppNumberField(
-      label: label,
-      initialValue: initialValue,
-      hintText: hintText,
-      onChanged: onChanged,
-      nonNegative: nonNegative,
-      focusNode: focusNode,
-      suffixText: suffixText ?? EnvConfig.currency,
+    return AppFormField(
+      label: widget.label,
+      controller: _controller,
+      hintText: widget.hintText,
+      onChanged: _handleChanged,
+      keyboardType: TextInputType.number,
+      inputFormatters: const [MoneyInputFormatter()],
+      enabled: true,
+      focusNode: widget.focusNode,
+      suffixText: widget.suffixText ?? EnvConfig.currency,
     );
   }
 }

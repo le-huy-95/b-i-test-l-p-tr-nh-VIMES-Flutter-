@@ -55,13 +55,14 @@ class OverviewPage extends StatelessWidget {
         }
 
         final authState = context.watch<AuthBloc>().state;
-        final selectedTenantName = authState is AuthAuthenticated
+        final selectedTenantName = authState is AuthAuthenticated &&
+                authState.tenants.isNotEmpty
             ? authState.tenants
-                .firstWhere(
-                  (t) => t.id == authState.selectedTenantId,
-                  orElse: () => authState.tenants.first,
-                )
-                .name
+                  .firstWhere(
+                    (t) => t.id == authState.selectedTenantId,
+                    orElse: () => authState.tenants.first,
+                  )
+                  .name
             : 'VIMES';
         final chartSections = _buildChartSections(context, state);
         final hasData = state.charts.values.any(
