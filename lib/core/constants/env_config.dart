@@ -37,6 +37,12 @@ class EnvConfig {
   }
 
   static String get mapsApiKey => dotenv.env['MAPS_API_KEY'] ?? '';
+  static String get googleIosClientId =>
+      dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
+  static String get googleServerClientId =>
+      dotenv.env['GOOGLE_SERVER_CLIENT_ID'] ?? '';
+  static String get googleIosUrlScheme =>
+      dotenv.env['GOOGLE_IOS_URL_SCHEME'] ?? '';
   static String get smsBaseUrl => dotenv.env['SMS_BASE_URL'] ?? '';
   static String get smsApiKey => dotenv.env['SMS_API_KEY'] ?? '';
   static String get currency => dotenv.env['CURRENCY'] ?? 'VND';

@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:test_y_app/core/constants/env_config.dart';
 
 /// Obtains a Firebase ID token via Google Sign-In for backend `/auth/login/google`.
 class GoogleAuthService {
@@ -30,10 +31,15 @@ class GoogleAuthService {
   }
 
   Future<void> _ensureInitialized() {
+    final serverClientId = EnvConfig.googleServerClientId;
+    if (serverClientId.isEmpty) {
+      throw const GoogleAuthException(
+        'Thiếu GOOGLE_SERVER_CLIENT_ID trong .env.',
+      );
+    }
     return _initFuture ??= _googleSignIn.initialize(
       // Web client ID from Firebase Google provider (serverClientId).
-      serverClientId:
-          '675490779243-82deesh10bvsnec1ltk25kfa9n0l4p1k.apps.googleusercontent.com',
+      serverClientId: serverClientId,
     );
   }
 

@@ -37,9 +37,10 @@ flutter run
 
 1. Tạo project trên [Firebase Console](https://console.firebase.google.com/)
 2. Thêm app Android/iOS
-3. Tải và đặt file cấu hình:
+3. Tải và đặt file cấu hình (không commit — đã có trong `.gitignore`):
    - `android/app/google-services.json`
    - `ios/Runner/GoogleService-Info.plist`
+   - `macos/Runner/GoogleService-Info.plist` (có thể copy từ `GoogleService-Info.plist.example`)
 4. (Tuỳ chọn) Chạy FlutterFire CLI:
 
 ```bash
@@ -55,6 +56,19 @@ Chỉnh `.env`:
 APP_ENV=dev
 API_DEV_URL=https://your-api.example.com
 API_PROD_URL=https://your-api.example.com
+MAPS_API_KEY=your_google_maps_api_key
+GOOGLE_IOS_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_SERVER_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_IOS_URL_SCHEME=com.googleusercontent.apps....
+```
+
+Google Maps / Sign-In:
+- Dart đọc qua `flutter_dotenv` + `EnvConfig`
+- Android đọc `MAPS_API_KEY` từ `.env` trong `android/app/build.gradle.kts`
+- iOS/macOS đọc từ `ios/Flutter/Secrets.xcconfig` — sau khi sửa `.env` chạy:
+
+```bash
+./tool/sync_ios_secrets.sh
 ```
 
 Endpoint demo hiện dùng JSONPlaceholder (`/posts`) để kiểm tra layer API.
