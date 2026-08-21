@@ -427,7 +427,6 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
             requestedQty: line.requestedQty.toString(),
             actualQty: line.actualQty.toString(),
             unitPrice: line.unitPrice.toString(),
-            batchId: line.batchId,
           ),
         ),
       );
@@ -751,7 +750,7 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       SimpleSnackbarService.showSuccess(
         _isEdit ? 'Đã cập nhật phiếu xuất' : 'Đã tạo phiếu xuất',
       );
-      Navigator.of(context).pop(true);
+      context.pop(true);
     } catch (e) {
       if (mounted) SimpleSnackbarService.showError(_friendly(e));
     } finally {
@@ -795,12 +794,9 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       final requested = double.tryParse(line.requestedQty.trim()) ?? 0;
       final actual = double.tryParse(line.actualQty.trim()) ?? 0;
       final price = double.tryParse(line.unitPrice.trim()) ?? 0;
-      final batch = (line.batchId != null && line.batchId!.trim().isNotEmpty)
-          ? '\nBatch: ${line.batchId}'
-          : '';
       lines.add([
         '${i + 1}',
-        '${product?.name ?? (line.productId.isEmpty ? '—' : line.productId)}$batch',
+        product?.name ?? (line.productId.isEmpty ? '—' : line.productId),
         product?.sku ?? '—',
         line.unitName,
         _formatNum(requested),
@@ -830,10 +826,9 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       totalInWords: _vietnameseWords(_totalAmount),
       signatureRoles: const [
         'Người lập phiếu',
-        'Người nhận hàng',
+        'Người giao hàng',
         'Thủ kho',
         'Kế toán trưởng',
-        'Giám đốc',
       ],
       note: _note.text.trim(),
     );
@@ -869,6 +864,16 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       if (c.id == _customerId) return c.title;
     }
     return _customerId!;
+  }
+
+  String _deliveryContactDisplayName() {
+    if (_deliveryContactId == null || _deliveryContactId!.trim().isEmpty) {
+      return '';
+    }
+    for (final contact in _deliveryContacts) {
+      if (contact.id == _deliveryContactId) return contact.title;
+    }
+    return '';
   }
 
   String? get _currentUserName {
@@ -1166,17 +1171,32 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'hàng hóa ',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            const Expanded(
+              child: Text(
+                'Hàng hóa',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
             ),
             if (_products.isNotEmpty)
-              TextButton.icon(
-                onPressed: _navigateToCreateProduct,
-                icon: const Icon(Icons.add, color: ColorSkin.primary),
-                label: const Text('Thêm SP'),
+              GestureDetector(
+                onTap: _addLine,
+                behavior: HitTestBehavior.opaque,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, size: 20, color: ColorSkin.primary),
+                    SizedBox(width: 4),
+                    Text(
+                      'Thêm sản phẩm',
+                      style: TextStyle(
+                        color: ColorSkin.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),
@@ -1374,6 +1394,7 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          Text('- Họ và tên người nhận hàng: ${_customerDisplayName()}'),
           Text('- Lý do xuất: ${issueTypeLabel(_issueType)}'),
           Text(
             '- Xuất tại kho (ngăn lô): $location, địa điểm: ${address == null || address.isEmpty ? '…………………' : address}',
@@ -1396,11 +1417,13 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
           _buildSignatureRow(
             const [
               'Người lập phiếu',
+              'Người giao hàng',
               'Thủ kho',
               'Kế toán trưởng',
             ],
             signatureNames: {
               'Người lập phiếu': _currentUserName ?? '',
+              'Người giao hàng': _deliveryContactDisplayName(),
               'Thủ kho':
                   _memberDisplayName(_warehouseKeeperController.text) ?? '',
               'Kế toán trưởng':
@@ -1677,20 +1700,6 @@ class _StockIssueFormScreenState extends State<_StockIssueFormScreen> {
                 ),
         ),
       ),
-      floatingActionButton: _currentStep == 1 && _products.isNotEmpty
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'issue_add',
-                  backgroundColor: ColorSkin.primary,
-                  onPressed: _addLine,
-                  child: const Icon(Icons.add, color: ColorSkin.white),
-                ),
-              ],
-            )
-          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -1741,7 +1750,6 @@ class _IssueLineDraft {
     this.requestedQty = '',
     this.actualQty = '',
     this.unitPrice = '',
-    this.batchId,
   });
 
   String productId;
@@ -1749,7 +1757,6 @@ class _IssueLineDraft {
   String requestedQty;
   String actualQty;
   String unitPrice;
-  String? batchId;
 
   Map<String, dynamic> toJson() {
     return {
@@ -1759,8 +1766,6 @@ class _IssueLineDraft {
       'actualQty': double.tryParse(actualQty.trim()) ?? 0,
       if (unitPrice.trim().isNotEmpty)
         'unitPrice': double.tryParse(unitPrice.trim()) ?? 0,
-      if (batchId != null && batchId!.trim().isNotEmpty)
-        'batchId': batchId!.trim(),
     };
   }
 }

@@ -110,11 +110,16 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
   StockDocumentBloc({required StockDocumentRepository repository})
     : _repository = repository,
       super(const StockDocumentInitial()) {
-    on<StockDocumentStarted>(_onStarted);
-    on<StockDocumentRefreshRequested>(_onRefresh);
-    on<StockDocumentTypeChanged>(_onTypeChanged);
-    on<StockDocumentActionRequested>(_onActionRequested);
-    on<StockDocumentSelected>(_onSelected);
+    // Process events one-by-one so _epoch cancellation cannot drop a
+    // just-completed action refresh while another load is in flight.
+    on<StockDocumentStarted>(_onStarted, transformer: _sequential());
+    on<StockDocumentRefreshRequested>(_onRefresh, transformer: _sequential());
+    on<StockDocumentTypeChanged>(_onTypeChanged, transformer: _sequential());
+    on<StockDocumentActionRequested>(
+      _onActionRequested,
+      transformer: _sequential(),
+    );
+    on<StockDocumentSelected>(_onSelected, transformer: _sequential());
   }
 
   final StockDocumentRepository _repository;
@@ -122,6 +127,10 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
   String _documentType = 'stock_issue';
   String? _selectedId;
   int _epoch = 0;
+
+  static EventTransformer<T> _sequential<T>() {
+    return (events, mapper) => events.asyncExpand(mapper);
+  }
 
   Future<void> _onStarted(
     StockDocumentStarted event,
@@ -175,10 +184,10 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     if (cache != null &&
         cache.selectedId == event.documentId &&
         cache.detail != null) {
+      // Show cached detail immediately, then refresh in background.
       emit(_loadedFromCache(_documentType, cache));
-      return;
     }
-    await _loadDetail(event.documentId, emit, showLoading: true);
+    await _loadDetail(event.documentId, emit, showLoading: cache?.detail == null);
   }
 
   Future<void> _onActionRequested(
@@ -189,15 +198,45 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     if (selectedId == null) return;
     emit(_currentLoaded(isActionSubmitting: true));
     try {
-      await _repository.action(_documentType, selectedId, event.body);
-      // Refresh detail + available-actions after mutation.
-      await _loadDetail(selectedId, emit, showLoading: false);
+      final actionResult = await _repository.action(
+        _documentType,
+        selectedId,
+        event.body,
+      );
+      // Optimistic list sync from action response (status/step may be partial).
+      _upsertListItem(actionResult);
+
+      await _loadDetail(
+        selectedId,
+        emit,
+        showLoading: false,
+        isActionSubmitting: true,
+      );
+
+      // Detail is the source of truth right after a mutation.
+      final mutationDetail = _tabCache[_documentType]?.detail ?? actionResult;
+      _upsertListItem(mutationDetail);
+      emit(
+        _currentLoaded(
+          isActionSubmitting: true,
+          detailOverride: mutationDetail,
+        ),
+      );
+
       await _loadList(
         emit,
         showLoading: false,
         preserveSelection: true,
         forceReload: true,
+        isActionSubmitting: true,
       );
+
+      // List API can lag behind workflow mutations — re-apply detail fields.
+      final latestDetail = _tabCache[_documentType]?.detail ?? mutationDetail;
+      if (latestDetail.documentId == selectedId) {
+        _upsertListItem(latestDetail);
+      }
+      emit(_currentLoaded(isActionSubmitting: false));
     } catch (e) {
       emit(_currentLoaded(isActionSubmitting: false, message: _friendly(e)));
     }
@@ -208,6 +247,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     required bool showLoading,
     bool preserveSelection = false,
     bool forceReload = false,
+    bool isActionSubmitting = false,
   }) async {
     final type = _documentType;
     final epoch = ++_epoch;
@@ -215,7 +255,13 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
 
     if (!forceReload && cache != null) {
       _selectedId = cache.selectedId;
-      emit(_loadedFromCache(type, cache));
+      emit(
+        _loadedFromCache(
+          type,
+          cache,
+          isActionSubmitting: isActionSubmitting,
+        ),
+      );
       return;
     }
 
@@ -238,7 +284,13 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
 
       if (selectedId == null) {
         _tabCache[type] = _DocumentTabCache(items: list, selectedId: null);
-        emit(StockDocumentLoaded(documentType: type, items: list));
+        emit(
+          StockDocumentLoaded(
+            documentType: type,
+            items: list,
+            isActionSubmitting: isActionSubmitting,
+          ),
+        );
         return;
       }
 
@@ -264,6 +316,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
             detail: cachedDetail,
             timeline: cachedTimeline,
             availableActions: cachedAvailable,
+            isActionSubmitting: isActionSubmitting,
           ),
         );
         return;
@@ -275,9 +328,15 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
           documentType: type,
           items: list,
           selectedId: selectedId,
+          isActionSubmitting: isActionSubmitting,
         ),
       );
-      await _loadDetail(selectedId, emit, showLoading: true);
+      await _loadDetail(
+        selectedId,
+        emit,
+        showLoading: true,
+        isActionSubmitting: isActionSubmitting,
+      );
     } catch (e) {
       if (epoch == _epoch) {
         emit(StockDocumentFailure(type, _friendly(e)));
@@ -289,11 +348,17 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
     String id,
     Emitter<StockDocumentState> emit, {
     required bool showLoading,
+    bool isActionSubmitting = false,
   }) async {
     final type = _documentType;
     final epoch = ++_epoch;
     if (showLoading) {
-      emit(_currentLoaded(isDetailLoading: true));
+      emit(
+        _currentLoaded(
+          isDetailLoading: true,
+          isActionSubmitting: isActionSubmitting,
+        ),
+      );
     }
     try {
       final detailFuture = _repository.getDetail(type, id);
@@ -308,8 +373,11 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
         // available-actions is supplementary; non-fatal.
       }
       if (epoch != _epoch) return;
+
+      final previousItems = _tabCache[type]?.items ?? const <StockDocument>[];
+      final items = _itemsWithUpsert(previousItems, detail);
       _tabCache[type] = _DocumentTabCache(
-        items: _tabCache[type]?.items ?? const [],
+        items: items,
         selectedId: id,
         detail: detail,
         timeline: timeline,
@@ -318,24 +386,80 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
       emit(
         StockDocumentLoaded(
           documentType: type,
-          items: _tabCache[type]?.items ?? const [],
+          items: items,
           selectedId: id,
           detail: detail,
           timeline: timeline,
           availableActions: available,
+          isActionSubmitting: isActionSubmitting,
         ),
       );
     } catch (e) {
       if (epoch == _epoch) {
-        emit(_currentLoaded(isDetailLoading: false, message: _friendly(e)));
+        emit(
+          _currentLoaded(
+            isDetailLoading: false,
+            isActionSubmitting: isActionSubmitting,
+            message: _friendly(e),
+          ),
+        );
       }
     }
+  }
+
+  /// Sync a document into the in-memory list cache (status / current step).
+  void _upsertListItem(StockDocument document) {
+    final type = _documentType;
+    final cache = _tabCache[type];
+    final previous = cache?.items ?? const <StockDocument>[];
+    final items = _itemsWithUpsert(previous, document);
+    _tabCache[type] = _DocumentTabCache(
+      items: items,
+      selectedId: cache?.selectedId ?? document.documentId,
+      detail: cache?.detail,
+      timeline: cache?.timeline ?? const [],
+      availableActions: cache?.availableActions,
+    );
+  }
+
+  static List<StockDocument> _itemsWithUpsert(
+    List<StockDocument> items,
+    StockDocument document,
+  ) {
+    final index = items.indexWhere(
+      (item) => item.documentId == document.documentId,
+    );
+    if (index < 0) {
+      return [document, ...items];
+    }
+    final existing = items[index];
+    final merged = StockDocument(
+      id: document.id.isNotEmpty ? document.id : existing.id,
+      documentType: document.documentType.isNotEmpty
+          ? document.documentType
+          : existing.documentType,
+      documentId: document.documentId,
+      status: document.status,
+      code: document.code ?? existing.code,
+      currentStepCode: document.currentStepCode ?? existing.currentStepCode,
+      currentStepStatus:
+          document.currentStepStatus ?? existing.currentStepStatus,
+      currentStepUpdatedAt:
+          document.currentStepUpdatedAt ?? existing.currentStepUpdatedAt,
+      lastActionById: document.lastActionById ?? existing.lastActionById,
+      lastActionAt: document.lastActionAt ?? existing.lastActionAt,
+      steps: document.steps.isNotEmpty ? document.steps : existing.steps,
+    );
+    final next = List<StockDocument>.of(items);
+    next[index] = merged;
+    return next;
   }
 
   StockDocumentLoaded _currentLoaded({
     bool? isDetailLoading,
     bool? isActionSubmitting,
     String? message,
+    StockDocument? detailOverride,
   }) {
     final cache = _tabCache[_documentType];
     if (cache != null) {
@@ -343,7 +467,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
         documentType: _documentType,
         items: cache.items,
         selectedId: cache.selectedId,
-        detail: cache.detail,
+        detail: detailOverride ?? cache.detail,
         timeline: cache.timeline,
         availableActions: cache.availableActions,
         isDetailLoading: isDetailLoading ?? false,
@@ -356,6 +480,7 @@ class StockDocumentBloc extends Bloc<StockDocumentEvent, StockDocumentState> {
       documentType: _documentType,
       items: const [],
       selectedId: _selectedId,
+      detail: detailOverride,
       isDetailLoading: isDetailLoading ?? false,
       isActionSubmitting: isActionSubmitting ?? false,
       message: message,

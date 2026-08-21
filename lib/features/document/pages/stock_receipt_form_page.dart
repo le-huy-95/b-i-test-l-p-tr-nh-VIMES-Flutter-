@@ -377,7 +377,6 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
                   expectedQty: line.expectedQty.toString(),
                   actualQty: line.actualQty.toString(),
                   unitPrice: line.unitPrice.toString(),
-                  batchNo: line.batchNo ?? '',
                   expiryDate: line.expiryDate == null
                       ? ''
                       : DateFormat('dd/MM/yyyy').format(line.expiryDate!),
@@ -416,11 +415,7 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
     final warehouse = _warehouseKeeperController.text.trim();
     final accountant = _chiefAccountantController.text.trim();
     // Slot giao hàng không còn chọn trên form — fallback thủ kho.
-    return [
-      delivery.isNotEmpty ? delivery : warehouse,
-      warehouse,
-      accountant,
-    ];
+    return [delivery.isNotEmpty ? delivery : warehouse, warehouse, accountant];
   }
 
   List<TenantMember> _membersForRole(String role) {
@@ -723,7 +718,7 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
       SimpleSnackbarService.showSuccess(
         _isEdit ? 'Đã cập nhật phiếu nhập' : 'Đã tạo phiếu nhập',
       );
-      Navigator.of(context).pop(true);
+      context.pop(true);
       return;
     } catch (e) {
       if (mounted) SimpleSnackbarService.showError(_friendly(e));
@@ -847,7 +842,6 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
           bottomSheetTitle: 'Chọn nhà cung cấp',
           searchHint: 'Tìm nhà cung cấp',
           items: _suppliers,
-          actionLabel: 'Tạo nhà cung cấp',
           onAction: _showCreateSupplierSheet,
           onChanged: (value) {
             setState(() {
@@ -928,9 +922,35 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Dòng hàng',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Hàng hóa',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ),
+            if (_products.isNotEmpty)
+              GestureDetector(
+                onTap: _addLine,
+                behavior: HitTestBehavior.opaque,
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, size: 20, color: ColorSkin.primary),
+                    SizedBox(width: 4),
+                    Text(
+                      'Thêm sản phẩm',
+                      style: TextStyle(
+                        color: ColorSkin.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         if (_products.isEmpty)
@@ -949,15 +969,6 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
             ),
             if (i != _lines.length - 1) const Divider(height: 32),
           ],
-        if (_products.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          AppButton(
-            label: 'Thêm sản phẩm',
-            onPressed: _navigateToCreateProduct,
-            variant: AppButtonVariant.outlined,
-            icon: const Icon(Icons.add, color: ColorSkin.primary),
-          ),
-        ],
       ],
     );
   }
@@ -1026,6 +1037,10 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
         DateTime.tryParse(_toIsoDate(_receiptDate.text)) ?? DateTime.now();
     final warehouse = _warehouseById(_selectedWarehouseId);
     final code = _existing?.code ?? '';
+    final deliveredByContact = _deliveryContacts
+        .cast<PartnerSelectDialogItem?>()
+        .firstWhere((c) => c?.id == _deliveryContactId, orElse: () => null);
+    final deliveredBy = deliveredByContact?.title ?? '';
     final supplier = _supplierDisplayName();
     final location = warehouse == null
         ? '………………………………'
@@ -1046,6 +1061,7 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
                 child: _buildReviewDocument(
                   date: date,
                   code: code,
+                  deliveredBy: deliveredBy,
                   supplier: supplier,
                   location: location,
                 ),
@@ -1060,6 +1076,7 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
   Widget _buildReviewDocument({
     required DateTime date,
     required String code,
+    required String deliveredBy,
     required String supplier,
     required String location,
   }) {
@@ -1132,6 +1149,9 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          Text(
+            '- Họ và tên người giao: ${deliveredBy.isEmpty ? '…………………' : deliveredBy}',
+          ),
           Text('- Theo: $supplier, số ………… ngày …… tháng …… năm ……'),
           Text('- Nhập tại kho: $location, địa điểm: ………………………………'),
           const SizedBox(height: 10),
@@ -1152,11 +1172,13 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
           _buildSignatureRow(
             const [
               'Người lập phiếu',
+              'Người giao hàng',
               'Thủ kho',
               'Kế toán trưởng',
             ],
             signatureNames: {
               'Người lập phiếu': _currentUserName ?? '',
+              'Người giao hàng': deliveredBy,
               'Thủ kho':
                   _memberDisplayName(_warehouseKeeperController.text) ?? '',
               'Kế toán trưởng':
@@ -1497,32 +1519,6 @@ class _StockReceiptFormScreenState extends State<_StockReceiptFormScreen> {
                 ),
         ),
       ),
-      floatingActionButton: _currentStep == 1 && _products.isNotEmpty
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                FloatingActionButton.extended(
-                  heroTag: 'receipt_add_product',
-                  onPressed: _navigateToCreateProduct,
-                  backgroundColor: ColorSkin.primary,
-                  foregroundColor: ColorSkin.white,
-                  icon: const Icon(Icons.add, color: ColorSkin.white),
-                  label: const Text(
-                    'Thêm sản phẩm',
-                    style: TextStyle(color: ColorSkin.white),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                FloatingActionButton(
-                  heroTag: 'receipt_add',
-                  backgroundColor: ColorSkin.primary,
-                  onPressed: _addLine,
-                  child: const Icon(Icons.add, color: ColorSkin.white),
-                ),
-              ],
-            )
-          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -1588,7 +1584,6 @@ class _ReceiptLineDraft {
     this.expectedQty = '',
     this.actualQty = '',
     this.unitPrice = '',
-    this.batchNo = '',
     this.expiryDate = '',
     this.manufactureDate = '',
   });
@@ -1598,7 +1593,6 @@ class _ReceiptLineDraft {
   String expectedQty;
   String actualQty;
   String unitPrice;
-  String batchNo;
   String expiryDate;
   String manufactureDate;
 
@@ -1610,7 +1604,6 @@ class _ReceiptLineDraft {
           double.tryParse(expectedQty.trim().replaceAll(',', '.')) ?? 0,
       'actualQty': double.tryParse(actualQty.trim().replaceAll(',', '.')) ?? 0,
       'unitPrice': double.tryParse(unitPrice.trim().replaceAll(',', '.')) ?? 0,
-      if (batchNo.trim().isNotEmpty) 'batchNo': batchNo.trim(),
       if (expiryDate.trim().isNotEmpty) 'expiryDate': toIsoDate(expiryDate),
       if (manufactureDate.trim().isNotEmpty)
         'manufactureDate': toIsoDate(manufactureDate),
@@ -1694,6 +1687,20 @@ class _ReceiptLineItem extends StatelessWidget {
           ],
           onChanged: (value) {
             draft.productId = value ?? '';
+
+            Product? product;
+            for (final p in products) {
+              if (p.id == value) {
+                product = p;
+                break;
+              }
+            }
+            if (product != null) {
+              draft.unitPrice = product.averageCost > 0
+                  ? formatNum(product.averageCost)
+                  : '';
+            }
+
             onChanged();
           },
         ),
@@ -1744,49 +1751,25 @@ class _ReceiptLineItem extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: AppNumberField(
-                label: 'Đơn giá',
-                initialValue: draft.unitPrice,
-                hintText: '0',
-                onChanged: (value) => draft.unitPrice = value,
-                nonNegative: true,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: AppTextField(
-                label: 'Batch No',
-                initialValue: draft.batchNo,
-                hintText: 'Nhập batch',
-                onChanged: (value) => draft.batchNo = value,
-              ),
-            ),
-          ],
+        AppPriceField(
+          label: 'Tiền mặt',
+          initialValue: draft.unitPrice,
+          hintText: '0',
+          onChanged: (value) => draft.unitPrice = value,
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: AppTextField(
-                label: 'HSD',
-                initialValue: draft.expiryDate,
-                hintText: 'dd/MM/yyyy',
-                onChanged: (value) => draft.expiryDate = value,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: AppTextField(
-                label: 'NSX',
-                initialValue: draft.manufactureDate,
-                hintText: 'dd/MM/yyyy',
-                onChanged: (value) => draft.manufactureDate = value,
-              ),
-            ),
-          ],
+        AppDateField(
+          label: 'HSD',
+          initialValue: draft.expiryDate,
+          required: false,
+          onChanged: (value) => draft.expiryDate = value,
+        ),
+        const SizedBox(height: 12),
+        AppDateField(
+          label: 'NSX',
+          initialValue: draft.manufactureDate,
+          required: false,
+          onChanged: (value) => draft.manufactureDate = value,
         ),
       ],
     );

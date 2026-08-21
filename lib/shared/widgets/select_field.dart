@@ -217,8 +217,8 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
           child: TextField(
             controller: _query,
-            autofocus: true,
             onChanged: (_) => setState(() {}),
+            textInputAction: TextInputAction.search,
             decoration: appFieldDecoration(
               hintText: widget.searchHint,
               prefixIcon: const Icon(Icons.search),
@@ -229,33 +229,38 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
         const Divider(height: 1),
         Expanded(
           child: _filtered.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.emptyText,
-                        style: TypoSkin.bodyText2.copyWith(
-                          color: ColorSkin.subtitle,
-                        ),
-                      ),
-                      if (widget.onAction != null &&
-                          widget.actionLabel != null) ...[
-                        const SizedBox(height: 16),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: AppButton(
-                            label: widget.actionLabel!,
-                            onPressed: () {
-                              Navigator.of(context).pop();
-                              widget.onAction?.call();
-                            },
-                            variant: AppButtonVariant.primary,
-                            expand: true,
+              ? GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.emptyText,
+                          style: TypoSkin.bodyText2.copyWith(
+                            color: ColorSkin.subtitle,
                           ),
                         ),
+                        if (widget.onAction != null &&
+                            widget.actionLabel != null) ...[
+                          const SizedBox(height: 16),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: AppButton(
+                              label: widget.actionLabel!,
+                              onPressed: () {
+                                FocusManager.instance.primaryFocus?.unfocus();
+                                Navigator.of(context).pop();
+                                widget.onAction?.call();
+                              },
+                              variant: AppButtonVariant.primary,
+                              expand: true,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 )
               : Column(
@@ -263,6 +268,8 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
                     Expanded(
                       child: ListView.separated(
                         padding: const EdgeInsets.symmetric(vertical: 8),
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
                         itemCount: _filtered.length,
                         separatorBuilder: (_, _) => const Divider(
                           height: 1,
@@ -276,7 +283,10 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
                             subtitle: item.subtitle == null
                                 ? null
                                 : Text(item.subtitle!),
-                            onTap: () => Navigator.of(context).pop(item),
+                            onTap: () {
+                              FocusManager.instance.primaryFocus?.unfocus();
+                              Navigator.of(context).pop(item);
+                            },
                           );
                         },
                       ),
@@ -289,6 +299,7 @@ class _AppSelectBottomSheetState<T extends AppSelectItem>
                         child: AppButton(
                           label: widget.actionLabel!,
                           onPressed: () {
+                            FocusManager.instance.primaryFocus?.unfocus();
                             Navigator.of(context).pop();
                             widget.onAction?.call();
                           },

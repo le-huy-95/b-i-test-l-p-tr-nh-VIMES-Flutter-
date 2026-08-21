@@ -4,17 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:test_y_app/app/router/app_router.dart';
 import 'package:test_y_app/core/auth/stock_doc_actions.dart';
-import 'package:test_y_app/core/auth/tenant_permissions.dart';
 import 'package:test_y_app/core/skin/color_skin.dart';
 import 'package:test_y_app/data/models/stock_document/stock_document.dart';
-import 'package:test_y_app/domain/repositories/file_repository.dart';
-import 'package:test_y_app/features/auth/bloc/auth_bloc.dart';
-import 'package:test_y_app/features/auth/bloc/auth_state.dart';
 import 'package:test_y_app/features/document/bloc/stock_document_bloc.dart';
 import 'package:test_y_app/features/document/document_formatters.dart';
-import 'package:test_y_app/features/document/workflow_approval_utils.dart';
-import 'package:test_y_app/features/document/widgets/workflow_action_dialog.dart';
-import 'package:test_y_app/features/document/widgets/workflow_approval_bottom_sheet.dart';
+import 'package:test_y_app/features/document/widgets/document_detail_bottom_sheet.dart';
 import 'package:test_y_app/shared/widgets/app_header.dart';
 
 class DocumentPage extends StatefulWidget {
@@ -29,7 +23,6 @@ class DocumentPage extends StatefulWidget {
 class _DocumentPageState extends State<DocumentPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  bool _showDetailOnMobile = false;
 
   static const _documentTypes = [
     ('stock_issue', 'Lệnh xuất hàng'),
@@ -58,75 +51,11 @@ class _DocumentPageState extends State<DocumentPage>
       setState(() {});
       return;
     }
-
-    if (_showDetailOnMobile) {
-      setState(() => _showDetailOnMobile = false);
-    }
   }
 
-  void _openDetail(StockDocument item) {
-    setState(() => _showDetailOnMobile = true);
-    context.read<StockDocumentBloc>().add(
-      StockDocumentSelected(item.documentId),
-    );
+  Future<void> _openDetail(StockDocument item) async {
+    await DocumentDetailBottomSheet.show(context, item: item);
   }
-
-  Future<void> _confirmAction({
-    required StockDocument detail,
-    required WorkflowStep step,
-    required StockDocAction action,
-    required AvailableActions? available,
-  }) async {
-    if (action == StockDocAction.approve) {
-      await WorkflowApprovalBottomSheet.show(
-        context,
-        stepName: step.stepName,
-        stepId: step.id,
-        actions: const ['approve'],
-        onSubmit: (selectedAction, note, proxySignerId, authorizationIds) async {
-          final body = <String, dynamic>{
-            'action': selectedAction,
-            'stepId': step.id,
-            if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
-          };
-          if (!mounted) return;
-          context.read<StockDocumentBloc>().add(StockDocumentActionRequested(body));
-        },
-      );
-      return;
-    }
-
-    final needsNote = action == StockDocAction.reject ||
-        action == StockDocAction.skip ||
-        action == StockDocAction.cancel ||
-        action == StockDocAction.complete;
-    final needsProxy = action == StockDocAction.proxySign;
-
-    final request = await WorkflowActionDialog.show(
-      context,
-      title: '${workflowActionLabel(action)} — ${step.stepName}',
-      stepId: step.id,
-      action: workflowActionCode(action),
-      fileRepository: context.read<FileRepository>(),
-      needsProxy: needsProxy,
-      needsAuthorization: needsProxy,
-      needsNote: needsNote,
-      needsSkip: action == StockDocAction.skip,
-    );
-    if (request == null || !mounted) return;
-    final body = request.toBody();
-    context.read<StockDocumentBloc>().add(StockDocumentActionRequested(body));
-  }
-
-  String? _currentUserId(BuildContext context) {
-    final auth = context.read<AuthBloc>().state;
-    if (auth is AuthAuthenticated && auth.user.id.isNotEmpty) {
-      return auth.user.id;
-    }
-    return null;
-  }
-
-  String _typeLabel(String type) => stockDocumentTypeLabel(type);
 
   Widget _buildList(StockDocumentLoaded state) {
     return RefreshIndicator(
@@ -168,282 +97,11 @@ class _DocumentPageState extends State<DocumentPage>
       'stock_receipt' => AppRoutes.stockReceiptNew.path,
       _ => AppRoutes.documents.path,
     };
-    final result = await context.push<bool>(path);
-    if (result == true && mounted) {
-      context.read<StockDocumentBloc>().add(
-        StockDocumentRefreshRequested(type),
-      );
-    }
-  }
-
-  Future<void> _openEdit(StockDocument detail) async {
-    final path = detail.documentType == 'stock_issue'
-        ? AppRoutes.stockIssueEdit.path.replaceFirst(':id', detail.documentId)
-        : AppRoutes.stockReceiptEdit.path.replaceFirst(
-            ':id',
-            detail.documentId,
-          );
-    final result = await context.push<bool>(path);
-    if (result == true && mounted) {
-      context.read<StockDocumentBloc>().add(
-        StockDocumentRefreshRequested(detail.documentType),
-      );
-    }
-  }
-
-  Widget _buildTabContent(StockDocumentLoaded state, bool isWide) {
-    if (isWide) {
-      return Row(
-        children: [
-          SizedBox(width: 360, child: _buildList(state)),
-          const VerticalDivider(width: 1),
-          Expanded(child: _buildDetail(state)),
-        ],
-      );
-    }
-    if (_showDetailOnMobile && state.selectedId != null) {
-      return _buildDetail(state);
-    }
-    return _buildList(state);
-  }
-
-  Widget _buildDetail(StockDocumentLoaded state) {
-    final detail = state.detail;
-    final available = state.availableActions;
-    if (state.isDetailLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (detail == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Chọn một phiếu để xem chi tiết'),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () => _openCreate(state.documentType),
-              child: Text('Tạo ${_typeLabel(state.documentType)}'),
-            ),
-          ],
-        ),
-      );
-    }
-    final canEdit = detail.status == 'draft';
-    // Use available-actions from API as primary source; fall back to role-based check.
-    final userId = _currentUserId(context);
-    final userRole = currentTenantRoleFromAuthState(context.read<AuthBloc>().state);
-    final isAssignedApprover = available?.currentStepAssignedApproverId == null ||
-        available?.currentStepAssignedApproverId == userId;
-    final approvableStep = userId == null || available == null
-        ? null
-        : (isAssignedApprover
-            ? detail.steps.cast<WorkflowStep?>().firstWhere(
-                  (s) => s?.id == available.currentStepId,
-                  orElse: () => null,
-                )
-            : null);
-
-    // If no available-actions (API unavailable), fall back to role-based step finder.
-    final WorkflowStep? fallbackStep;
-    if (approvableStep == null && userId != null) {
-      fallbackStep = findApprovableStepForUser(
-        steps: detail.steps,
-        userId: userId,
-        userRole: userRole,
-        documentStatus: detail.status,
-        assignedApproverIds: assignedApproverIdsFromWorkflowSteps(detail.steps),
-      );
-    } else {
-      fallbackStep = null;
-    }
-    final currentStep = approvableStep ?? fallbackStep;
-
-    // Primary action sources from API; fall back to role-based actions.
-    final primaryActions = available?.actions ?? <String>[];
-    final List<StockDocAction> roleBasedActions;
-    if (detail.documentType == 'stock_receipt') {
-      roleBasedActions = visibleReceiptActions(
-        status: detail.status,
-        role: userRole ?? '',
-      );
-    } else {
-      roleBasedActions = visibleIssueActions(
-        status: detail.status,
-        role: userRole ?? '',
-      );
-    }
-
-    bool hasAction(String code) {
-      if (primaryActions.contains(code)) return true;
-      return roleBasedActions.any((a) => workflowActionCode(a) == code);
-    }
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        context.read<StockDocumentBloc>().add(
-          StockDocumentRefreshRequested(state.documentType),
-        );
-      },
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          _HeaderCard(detail: detail),
-          const SizedBox(height: 16),
-          const Text(
-            'Workflow 4 bước',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          ...detail.steps.map((step) => _WorkflowStepCard(step: step)),
-          const SizedBox(height: 16),
-          const Text(
-            'Lịch sử',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          if (state.timeline.isEmpty)
-            const Text('Chưa có timeline')
-          else
-            ...state.timeline.map(
-              (event) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.history),
-                title: Text('${event.fromStatus ?? '—'} → ${event.toStatus}'),
-                subtitle: Text(
-                  '${DateFormat('dd/MM/yyyy HH:mm').format(event.changedAt)}${event.note != null ? '\n${event.note}' : ''}',
-                ),
-              ),
-            ),
-          const SizedBox(height: 24),
-          if (currentStep != null) ...[
-            const Text(
-              'Hành động bước hiện tại',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                if (hasAction('approve'))
-                  FilledButton.tonal(
-                    onPressed: state.isActionSubmitting
-                        ? null
-                        : () => _confirmAction(
-                              detail: detail,
-                              step: currentStep,
-                              action: StockDocAction.approve,
-                              available: available,
-                            ),
-                    child: const Text('Phê duyệt'),
-                  ),
-                if (hasAction('reject'))
-                  FilledButton.tonal(
-                    onPressed: state.isActionSubmitting
-                        ? null
-                        : () => _confirmAction(
-                              detail: detail,
-                              step: currentStep,
-                              action: StockDocAction.reject,
-                              available: available,
-                            ),
-                    child: Text(workflowActionLabel(StockDocAction.reject)),
-                  ),
-                if (hasAction('skip'))
-                  FilledButton.tonal(
-                    onPressed: state.isActionSubmitting
-                        ? null
-                        : () => _confirmAction(
-                              detail: detail,
-                              step: currentStep,
-                              action: StockDocAction.skip,
-                              available: available,
-                            ),
-                    child: Text(workflowActionLabel(StockDocAction.skip)),
-                  ),
-                if (hasAction('proxy_sign'))
-                  FilledButton.tonal(
-                    onPressed: state.isActionSubmitting
-                        ? null
-                        : () => _confirmAction(
-                              detail: detail,
-                              step: currentStep,
-                              action: StockDocAction.proxySign,
-                              available: available,
-                            ),
-                    child: Text(workflowActionLabel(StockDocAction.proxySign)),
-                  ),
-              ],
-            ),
-          ],
-          // Document-level actions (submit / complete / cancel) — no stepId needed.
-          if (hasAction('submit') || hasAction('complete') || hasAction('cancel')) ...[
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-          if (hasAction('submit'))
-            FilledButton(
-              onPressed: state.isActionSubmitting
-                  ? null
-                  : () => _confirmDocumentAction(
-                        action: StockDocAction.submit,
-                      ),
-              child: Text(workflowActionLabel(StockDocAction.submit)),
-            ),
-          if (hasAction('complete'))
-            FilledButton(
-              onPressed: state.isActionSubmitting
-                  ? null
-                  : () => _confirmDocumentAction(
-                        action: StockDocAction.complete,
-                      ),
-              child: Text(workflowActionLabel(StockDocAction.complete)),
-            ),
-          if (hasAction('cancel'))
-            FilledButton.tonal(
-              onPressed: state.isActionSubmitting
-                  ? null
-                  : () => _confirmDocumentAction(
-                        action: StockDocAction.cancel,
-                      ),
-              child: Text(workflowActionLabel(StockDocAction.cancel)),
-            ),
-              ],
-            ),
-          ],
-          if (canEdit) ...[
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: state.isActionSubmitting
-                  ? null
-                  : () => _openEdit(detail),
-              child: const Text('Sửa phiếu'),
-            ),
-          ],
-        ],
-      ),
+    await context.push<bool>(path);
+    if (!mounted) return;
+    context.read<StockDocumentBloc>().add(
+      StockDocumentRefreshRequested(type),
     );
-  }
-
-  Future<void> _confirmDocumentAction({
-    required StockDocAction action,
-  }) async {
-    final needsNote = action == StockDocAction.cancel ||
-        action == StockDocAction.complete;
-    final request = await WorkflowActionDialog.show(
-      context,
-      title: workflowActionLabel(action),
-      stepId: '', // Document-level actions don't need stepId.
-      action: workflowActionCode(action),
-      fileRepository: context.read<FileRepository>(),
-      needsProxy: false,
-      needsAuthorization: false,
-      needsNote: needsNote,
-    );
-    if (request == null || !mounted) return;
-    context.read<StockDocumentBloc>().add(StockDocumentActionRequested(request.toBody()));
   }
 
   @override
@@ -463,80 +121,57 @@ class _DocumentPageState extends State<DocumentPage>
             if (mounted) _tabController.animateTo(currentIndex);
           });
         }
-        final showingMobileDetail =
-            _showDetailOnMobile &&
-            state is StockDocumentLoaded &&
-            state.selectedId != null;
         final currentTabType = _documentTypes[_tabController.index].$1;
         final isActionSubmitting =
             state is StockDocumentLoaded && state.isActionSubmitting;
 
-        final page = PopScope(
-          canPop: !showingMobileDetail,
-          onPopInvokedWithResult: (didPop, result) {
-            if (!didPop && showingMobileDetail) {
-              setState(() => _showDetailOnMobile = false);
-            }
-          },
-          child: widget.embedded
-              ? Column(
-                  children: [
-                    _buildHeaderBar(context, showingMobileDetail),
-                    Expanded(
-                      child: Stack(
-                        children: [
-                          _buildBody(context, state, showingMobileDetail),
-                          if (!showingMobileDetail)
-                            Positioned(
-                              right: 16,
-                              bottom: 16,
-                              child: FloatingActionButton(
-                                tooltip: 'Tạo phiếu mới',
-                                backgroundColor: ColorSkin.primary,
-                                onPressed: () => _openCreate(currentTabType),
-                                child: const Icon(
-                                  Icons.add,
-                                  color: ColorSkin.white,
-                                ),
-                              ),
+        final page = widget.embedded
+            ? Column(
+                children: [
+                  _buildHeaderBar(),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        _buildBody(context, state),
+                        Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: FloatingActionButton(
+                            tooltip: 'Tạo phiếu mới',
+                            backgroundColor: ColorSkin.primary,
+                            onPressed: () => _openCreate(currentTabType),
+                            child: const Icon(
+                              Icons.add,
+                              color: ColorSkin.white,
                             ),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-              : Scaffold(
-                  appBar: AppHeader(
-                    leading: showingMobileDetail
-                        ? BackButton(
-                            onPressed: () =>
-                                setState(() => _showDetailOnMobile = false),
-                          )
-                        : null,
-                    onTitleTap: () =>
-                        setState(() => _showDetailOnMobile = false),
-                    title: Text(showingMobileDetail ? 'Chi tiết phiếu' : ''),
-                    bottom: TabBar(
-                      controller: _tabController,
-                      tabs: [
-                        for (final tab in _documentTypes) Tab(text: tab.$2),
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  floatingActionButton: showingMobileDetail
-                      ? null
-                      : FloatingActionButton(
-                          tooltip: 'Tạo phiếu mới',
-                          backgroundColor: ColorSkin.white,
-                          onPressed: () => _openCreate(currentTabType),
-                          child: const Icon(
-                            Icons.add,
-                            color: ColorSkin.primary,
-                          ),
-                        ),
-                  body: _buildBody(context, state, showingMobileDetail),
+                ],
+              )
+            : Scaffold(
+                appBar: AppHeader(
+                  title: const Text(''),
+                  bottom: TabBar(
+                    controller: _tabController,
+                    tabs: [
+                      for (final tab in _documentTypes) Tab(text: tab.$2),
+                    ],
+                  ),
                 ),
-        );
+                floatingActionButton: FloatingActionButton(
+                  tooltip: 'Tạo phiếu mới',
+                  backgroundColor: ColorSkin.white,
+                  onPressed: () => _openCreate(currentTabType),
+                  child: const Icon(
+                    Icons.add,
+                    color: ColorSkin.primary,
+                  ),
+                ),
+                body: _buildBody(context, state),
+              );
 
         if (!isActionSubmitting) return page;
 
@@ -551,7 +186,7 @@ class _DocumentPageState extends State<DocumentPage>
     );
   }
 
-  Widget _buildHeaderBar(BuildContext context, bool showingMobileDetail) {
+  Widget _buildHeaderBar() {
     return Material(
       color: ColorSkin.white,
       child: TabBar(
@@ -561,11 +196,7 @@ class _DocumentPageState extends State<DocumentPage>
     );
   }
 
-  Widget _buildBody(
-    BuildContext context,
-    StockDocumentState state,
-    bool showingMobileDetail,
-  ) {
+  Widget _buildBody(BuildContext context, StockDocumentState state) {
     if (state is StockDocumentFailure) {
       return Center(
         child: Column(
@@ -585,46 +216,40 @@ class _DocumentPageState extends State<DocumentPage>
         ),
       );
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 760;
-        return Column(
-          children: [
-            if (state is StockDocumentLoaded && state.message != null)
-              MaterialBanner(
-                content: Text(state.message!),
-                actions: [
-                  TextButton(
-                    onPressed: () => context.read<StockDocumentBloc>().add(
-                      StockDocumentRefreshRequested(state.documentType),
-                    ),
-                    child: const Text('Tải lại'),
-                  ),
-                ],
+    return Column(
+      children: [
+        if (state is StockDocumentLoaded && state.message != null)
+          MaterialBanner(
+            content: Text(state.message!),
+            actions: [
+              TextButton(
+                onPressed: () => context.read<StockDocumentBloc>().add(
+                  StockDocumentRefreshRequested(state.documentType),
+                ),
+                child: const Text('Tải lại'),
               ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildTabBody(context, state, isWide, _documentTypes[0].$1),
-                  _buildTabBody(context, state, isWide, _documentTypes[1].$1),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
+            ],
+          ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildTabBody(context, state, _documentTypes[0].$1),
+              _buildTabBody(context, state, _documentTypes[1].$1),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildTabBody(
     BuildContext context,
     StockDocumentState state,
-    bool isWide,
     String type,
   ) {
     if (state is StockDocumentLoaded && state.documentType == type) {
-      return _buildTabContent(state, isWide);
+      return _buildList(state);
     }
     if (state is StockDocumentFailure && state.documentType == type) {
       return Center(
@@ -648,7 +273,6 @@ class _DocumentPageState extends State<DocumentPage>
     if (state is StockDocumentLoading && state.documentType == type) {
       return const Center(child: CircularProgressIndicator());
     }
-    // Tab is selected but bloc still holds another type — keep UI alive while syncing.
     if (_documentTypes[_tabController.index].$1 == type) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -914,156 +538,6 @@ class _DocumentMetaRow extends StatelessWidget {
           ),
         ],
       ],
-    );
-  }
-}
-
-class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({required this.detail});
-
-  final StockDocument detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final isReceipt = detail.documentType == 'stock_receipt';
-    final accent = isReceipt ? ColorSkin.primary : ColorSkin.secondary1;
-    final accentBg = isReceipt ? ColorSkin.tealLight : ColorSkin.orangeLight;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: ColorSkin.border1.withValues(alpha: 0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: accentBg,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  isReceipt
-                      ? Icons.move_to_inbox_outlined
-                      : Icons.outbox_outlined,
-                  color: accent,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      stockDocumentDisplayCode(detail),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: ColorSkin.title,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      stockDocumentTypeLabel(detail.documentType),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: ColorSkin.subtitle,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _StatusChip(status: detail.status),
-            ],
-          ),
-          const SizedBox(height: 14),
-          const Divider(height: 1, color: ColorSkin.grey3),
-          const SizedBox(height: 12),
-          _DocumentMetaRow(
-            icon: Icons.route_outlined,
-            label: 'Bước hiện tại',
-            value: stockDocumentCurrentStepLabel(detail),
-          ),
-          if (detail.lastActionAt != null) ...[
-            const SizedBox(height: 8),
-            _DocumentMetaRow(
-              icon: Icons.schedule_outlined,
-              label: 'Lần cập nhật cuối',
-              value: DateFormat(
-                'dd/MM/yyyy HH:mm',
-              ).format(detail.lastActionAt!),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _WorkflowStepCard extends StatelessWidget {
-  const _WorkflowStepCard({required this.step});
-
-  final WorkflowStep step;
-
-  Color _color() {
-    return switch (step.status) {
-      'approved' => Colors.green,
-      'signed_by_proxy' => Colors.blue,
-      'rejected' => Colors.red,
-      'skipped' => Colors.orange,
-      'cancelled' => Colors.grey,
-      _ => Colors.grey,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: ColorSkin.border1),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            backgroundColor: _color().withValues(alpha: 0.12),
-            child: Icon(Icons.check, color: _color()),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  step.stepName,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 4),
-                Text('Trạng thái: ${stockDocStatusLabel(step.status)}'),
-                if (step.note != null && step.note!.isNotEmpty)
-                  Text('Ghi chú: ${step.note}'),
-                if (step.actionAt != null)
-                  Text(
-                    'Thời gian: ${DateFormat('dd/MM/yyyy HH:mm').format(step.actionAt!)}',
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

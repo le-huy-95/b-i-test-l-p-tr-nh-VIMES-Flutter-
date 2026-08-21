@@ -21,6 +21,9 @@ class AppBottomSheetService {
     EdgeInsetsGeometry actionsPadding = const EdgeInsets.fromLTRB(20, 20, 20, 16),
     double maxHeightFactor = 0.85,
   }) {
+    // Close any keyboard from the underlying page before presenting the sheet.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     return showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,

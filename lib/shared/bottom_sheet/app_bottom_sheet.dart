@@ -39,7 +39,11 @@ class AppBottomSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    final maxHeight = MediaQuery.sizeOf(context).height * maxHeightFactor;
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    // Shrink into the space above the keyboard instead of pushing the sheet
+    // upward past the page header.
+    final maxHeight =
+        (screenHeight * maxHeightFactor - bottomInset).clamp(120.0, screenHeight);
 
     final header = _buildHeader(context);
     final messageWidget = message == null
@@ -71,6 +75,8 @@ class AppBottomSheet extends StatelessWidget {
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
             child: SingleChildScrollView(
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -112,9 +118,15 @@ class AppBottomSheet extends StatelessWidget {
       );
     }
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: sheet,
+    // Tap outside text fields dismisses the keyboard; search fields only
+    // open the keyboard when the user focuses them (no autofocus).
+    return GestureDetector(
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      behavior: HitTestBehavior.deferToChild,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: sheet,
+      ),
     );
   }
 

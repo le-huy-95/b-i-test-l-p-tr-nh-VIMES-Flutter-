@@ -61,8 +61,8 @@ class _AuthorizationSelectDialogState extends State<AuthorizationSelectDialog> {
           children: [
             TextField(
               controller: _query,
-              autofocus: true,
               onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
               decoration: const InputDecoration(
                 hintText: 'Tìm giấy ủy quyền...',
                 prefixIcon: Icon(Icons.search),
